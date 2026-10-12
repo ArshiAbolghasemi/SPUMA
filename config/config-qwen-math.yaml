@@ -1,0 +1,233 @@
+# SPUMA — the single configuration file. Each section is defined in its package's config.py and
+# assembled/validated by spuma.config.settings.Settings at startup.
+# Override any scalar with SPUMA_<SECTION>__<KEY>, e.g. SPUMA_MODEL__DEVICE=cpu.
+# Secrets (HF_TOKEN) go in .env, never here.
+
+project:
+  name: spuma
+  seed: 42
+
+experiment:
+  name: ma_qwen_math
+  output_dir: artifacts
+  resume: true
+  # Tool-use conditions. Each variant overrides allowed_tools for the listed agents only;
+  # splits and every other setting stay identical across variants.
+  variants:
+    no_tools:
+      allowed_tools: {solver: [], reviewer: []}
+    solver_tools:
+      allowed_tools: {reviewer: []}
+    both_tools: {}
+  spn_protocol: within_variant  # or cross_variant (also scores each SPN on the other variants' test sets)
+
+model:
+  name: Qwen/Qwen3-8B
+  revision: null             # pin a Hub commit for reproducibility
+  tokenizer_revision: null   # null: same as revision
+  # Generation backend (agent steps + semantic-entropy sampling): transformers | vllm
+  backend: transformers
+  # PE/NLL scoring backend: same | transformers | vllm
+  #   same          score at generation time with `backend` (exact: raw distribution, same context)
+  #   transformers  teacher-force the saved prompt/continuation token ids in a later stage; with
+  #                 backend: vllm this is the hybrid mode (vLLM is released before Transformers loads)
+  scoring_backend: same
+  dtype: bfloat16
+  enable_thinking: false
+  generation:
+    temperature: 0.7
+    top_p: 0.9
+    top_k: null              # null = disabled (translated to each backend's own "off" value)
+    max_new_tokens: 2048
+
+  transformers:
+    device: auto
+    attn_implementation: sdpa
+    scoring_chunk_size: 256  # vocabulary-softmax rows per chunk on the GPU
+
+  vllm:
+    max_model_len: 8192
+    gpu_memory_utilization: 0.85
+    tensor_parallel_size: 1
+    max_logprobs: -1         # -1 = full vocabulary; needed for PE computed by vLLM
+    enforce_eager: false
+
+# Extra named models for future agents (agents reference them by key; `default` is `model` above).
+models: {}
+
+agents:
+  workflow: sequential
+  items:
+    - id: solver
+      model: default
+      role: solver
+      enabled: true
+      system_prompt: >-
+        Solve mathematical problems step by step. Use available tools when helpful.
+        Put the final answer in \boxed{}.
+      user_template: "Problem:\n{problem}"
+      allowed_tools:
+        - sympy_solve
+        - sympy_simplify
+        - sympy_integrate
+        - sympy_differentiate
+        - python_execute
+
+    - id: reviewer
+      model: default
+      role: reviewer
+      enabled: true
+      system_prompt: >-
+        Review mathematical reasoning, verify calculations, correct mistakes, and produce the final answer.
+        Put the final answer in \boxed{}.
+      user_template: "Problem:\n{problem}\n\nProposed solution:\n{previous}\n\nReview it and give the final answer."
+      allowed_tools:
+        - sympy_solve
+        - sympy_simplify
+        - math_verify
+        - python_execute
+
+orchestration:
+  framework: langgraph
+  max_steps_per_agent: 8
+  max_tool_calls_per_agent: 5
+
+tools:
+  enabled: true
+
+  registry:
+    sympy_solve:
+      enabled: true
+      provider: sympy
+      timeout_seconds: 10
+
+    sympy_simplify:
+      enabled: true
+      provider: sympy
+      timeout_seconds: 10
+
+    sympy_integrate:
+      enabled: true
+      provider: sympy
+      timeout_seconds: 10
+
+    sympy_differentiate:
+      enabled: true
+      provider: sympy
+      timeout_seconds: 10
+
+    math_verify:
+      enabled: true
+      provider: math_verify
+      timeout_seconds: 10
+
+    python_execute:
+      enabled: false
+      provider: python_sandbox
+      timeout_seconds: 10
+      network_access: false   # must stay false; the sandbox refuses anything else
+      image: python:3.12-slim
+      memory_mb: 512
+      cpus: 1.0
+      pids_limit: 64
+
+  execution:
+    log_calls: true
+    save_results: true
+    max_output_tokens: 1024
+    on_error: return_error
+
+dataset:
+  name: math
+  source: huggingface
+  hf_path: EleutherAI/hendrycks_math
+  seed: 42
+  train_samples: 800
+  validation_samples: 200
+  test_samples: 500
+
+uncertainty:
+  predictive_entropy:
+    enabled: true
+    full_vocabulary: true
+    distribution: raw_model  # untempered, untruncated model distribution
+
+  semantic_entropy:
+    enabled: true
+    backend: uqlm            # uqlm.scorers.SemanticEntropy: NLI clustering + discrete entropy
+    # sampling (done by the generation backend from each step's frozen context)
+    n: 10
+    temperature: 0.7
+    top_p: 0.9
+    top_k: null
+    max_new_tokens: null     # null: the agent's max_new_tokens
+    tool_call_policy: no_execution
+    # clustering (UQLM): the step's text + its n samples, NLI entailment in either direction
+    nli_model_name: microsoft/deberta-large-mnli
+    nli_max_length: 2000     # characters per text; UQLM truncates longer ones
+    nli_batch_size: 32
+    nli_device: null         # null: CUDA, then MPS, then CPU
+
+  nll:
+    enabled: true
+    normalize_by_length: true
+
+  token_length:
+    enabled: true
+
+aggregation:
+  predictive_entropy: rms
+  semantic_entropy: rms
+  nll: rms
+  token_length: mean
+
+features:
+  order:
+    - solver_pe
+    - solver_se
+    - solver_nll
+    - solver_length
+    - reviewer_pe
+    - reviewer_se
+    - reviewer_nll
+    - reviewer_length
+
+spn:
+  backend: spflow
+  model_type: class_conditional
+  target: incorrect
+  seed: 42
+  leaf: normal
+  min_instances_slice: 50
+  min_features_slice: 2
+  rdc_threshold: 0.3
+  standardize: true
+  prior_smoothing: 1.0
+
+evaluation:
+  metrics:
+    - auroc
+    - auarc
+    - aurc
+    - auprc
+    - accuracy
+    - brier
+    - ece
+    - nll
+  ece_bins: 15
+  # Error-risk models to train and evaluate (registry: spuma/evaluation/risk.py). Only the SPN for now.
+  risk_models:
+    - spn
+
+  bootstrap:
+    enabled: true
+    iterations: 1000
+    confidence: 0.95
+    cluster_by: problem_id
+
+logging:
+  level: INFO
+  format: json
+  console: true
+  file: true
+  directory: logs
