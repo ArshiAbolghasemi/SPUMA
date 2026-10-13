@@ -49,7 +49,9 @@ def test_cache_fingerprints_split_generation_and_scoring(config):
     hybrid = dataclasses.replace(
         config, model=dataclasses.replace(config.model, **{"backend": "vllm", "scoring_backend": "transformers"})
     )
-    vllm_only = dataclasses.replace(config, model=dataclasses.replace(config.model, **{"backend": "vllm"}))
+    vllm_only = dataclasses.replace(
+        config, model=dataclasses.replace(config.model, backend="vllm", scoring_backend="same")
+    )
     # same generator, but `same` scores while generating and hybrid does not: different trajectories
     assert hybrid.generation_fingerprint() != vllm_only.generation_fingerprint()
     assert hybrid.scoring_fingerprint() != vllm_only.scoring_fingerprint()

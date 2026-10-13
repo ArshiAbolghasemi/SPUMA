@@ -53,7 +53,9 @@ def test_solver_tool_cycle_then_reviewer(config, runner, scripted_backend_cls):
     assert "math_verify" in backend.tools_seen[2] and "math_verify" not in backend.tools_seen[0]
 
 
-def test_step_records_reconstruct_model_call(config, runner, scripted_backend_cls):
+def test_step_records_reconstruct_model_call(config, set_settings, runner, scripted_backend_cls):
+    same = dataclasses.replace(config.model, backend="transformers", scoring_backend="same")
+    set_settings(dataclasses.replace(config, model=same))  # scores captured while generating
     backend = scripted_backend_cls(["\\boxed{1}", "\\boxed{1}"])
     traj = _workflow(backend, runner).run("p2", "1?")
     step = traj.agents[0].steps[0]

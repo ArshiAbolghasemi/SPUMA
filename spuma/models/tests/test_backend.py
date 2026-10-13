@@ -75,7 +75,8 @@ def test_fingerprints_separate_engines_and_generation():
 
 
 def test_generation_logprob_mode(config, set_settings):
-    assert generation_logprob_mode(config.model) == "full"
+    same = dataclasses.replace(config.model, backend="transformers", scoring_backend="same")
+    assert generation_logprob_mode(same) == "full"
     hybrid = dataclasses.replace(config.model, **{"backend": "vllm", "scoring_backend": "transformers"})
     assert generation_logprob_mode(hybrid) == "none"
     uq = config.uncertainty
@@ -83,7 +84,7 @@ def test_generation_logprob_mode(config, set_settings):
         uq, **{"predictive_entropy": dataclasses.replace(uq.predictive_entropy, **{"enabled": False})}
     )
     set_settings(dataclasses.replace(config, uncertainty=no_pe, features=_features_without(config, "_pe")))
-    assert generation_logprob_mode(config.model) == "token"
+    assert generation_logprob_mode(same) == "token"
 
 
 def _features_without(config, suffix):
@@ -128,7 +129,8 @@ def test_execution_plan_requires_tool_calling_only_with_tools(config, set_settin
     assert "tool_calling" not in execution_plan()["default"]["generation_requires"]
 
 
-def test_validation_passes_for_transformers():
+def test_validation_passes_for_transformers(with_model):
+    with_model(backend="transformers", scoring_backend="same")
     plan = validate_backends()
     assert plan["default"]["generation_backend"] == "transformers"
 
@@ -141,7 +143,7 @@ def test_validation_fails_early_without_vllm(with_model, monkeypatch):
 
 
 def test_validation_reports_capped_logprobs(with_model, set_settings, fake_vllm_module):
-    capped = with_model(backend="vllm", vllm={"max_logprobs": 20})
+    capped = with_model(backend="vllm", scoring_backend="same", vllm={"max_logprobs": 20})
     with pytest.raises(BackendCapabilityError, match="full_vocabulary_logprobs"):
         validate_backends()
     # NLL-only experiments do not need the full vocabulary

@@ -17,12 +17,12 @@ model:
   revision: null             # pin a Hub commit for reproducibility
   tokenizer_revision: null   # null: same as revision
   # Generation backend (agent steps + semantic-entropy sampling): transformers | vllm
-  backend: transformers
+  backend: vllm
   # PE/NLL scoring backend: same | transformers | vllm
   #   same          score at generation time with `backend` (exact: raw distribution, same context)
   #   transformers  teacher-force the saved prompt/continuation token ids in a later stage; with
   #                 backend: vllm this is the hybrid mode (vLLM is released before Transformers loads)
-  scoring_backend: same
+  scoring_backend: transformers
   dtype: bfloat16
   enable_thinking: false
   generation:
