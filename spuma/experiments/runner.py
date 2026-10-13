@@ -29,7 +29,7 @@ import platform
 import subprocess
 import sys
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import asdict
 from datetime import UTC, datetime
 from importlib import metadata
@@ -41,6 +41,7 @@ from spuma.agents.trajectory import Trajectory
 from spuma.agents.workflow import build_workflow
 from spuma.artifacts import FileArtifactStore
 from spuma.common.config import to_plain
+from spuma.common.logs import progress
 from spuma.common.utils import safe_name
 from spuma.config import PROJECT_ROOT, get_settings
 from spuma.dataset.base import AnswerGrader, DatasetProvider, Problem
@@ -183,6 +184,12 @@ class ExperimentRunner:
             raise RuntimeError("no splits.json: run the generate phase first")
         return {k: [Problem(**p) for p in v] for k, v in self.store.read_json("splits.json").items()}
 
+    def _each_problem(self, phase: str) -> Iterator[tuple[str, int, Problem]]:
+        """(split, index, problem) over every split, with a progress bar for the phase."""
+        splits = self.problems()
+        items = [(split, i, p) for split, problems in splits.items() for i, p in enumerate(problems)]
+        return progress(items, total=len(items), desc=phase)
+
     def _backends(self) -> dict[str, ModelBackend]:
         """Generation engine per agent (shared by agents on the same model)."""
         config = get_settings()
@@ -199,66 +206,64 @@ class ExperimentRunner:
         executor = ToolExecutor(registry, truncate=first.truncate)
         workflow = build_workflow(registry, backends.__getitem__, executor)
         self.store.write_json(f"{self.generation_dir()}/agents.json", [a.describe() for a in workflow.agents])
-        for split, problems in self.problems().items():
-            for i, problem in enumerate(problems):
-                rel = f"{self.generation_dir()}/trajectories/{safe_name(problem.problem_id)}.json"
-                if get_settings().experiment.resume and self.store.exists(rel):
-                    record = self.store.read_json(rel)
-                    trajectory = Trajectory.model_validate(record["trajectory"])
-                    if not any(
-                        samplers[t.agent_id].needs_samples(s)
-                        for t in trajectory.agents
-                        for s in t.steps
-                        if t.agent_id in samplers
-                    ):
-                        continue
-                    grade_dict = record["grade"]
-                else:
-                    # Only the id and the problem text enter the workflow; the reference stays here.
-                    trajectory = workflow.run(problem.problem_id, problem.problem)
-                    grade_dict = self.grader.grade(problem, trajectory.final_answer_text).to_dict()
-                for trace in trajectory.agents:
-                    if trace.agent_id in samplers:
-                        samplers[trace.agent_id].sample_steps(trace.steps)
-                self.store.write_json(rel, {"split": split, "trajectory": trajectory.model_dump(), "grade": grade_dict})
-                logger.info(
-                    "generated",
-                    extra={
-                        "split": split,
-                        "index": i,
-                        "problem_id": problem.problem_id,
-                        "label": grade_dict["label"],
-                    },
-                )
+        for split, i, problem in self._each_problem("generate"):
+            rel = f"{self.generation_dir()}/trajectories/{safe_name(problem.problem_id)}.json"
+            if get_settings().experiment.resume and self.store.exists(rel):
+                record = self.store.read_json(rel)
+                trajectory = Trajectory.model_validate(record["trajectory"])
+                if not any(
+                    samplers[t.agent_id].needs_samples(s)
+                    for t in trajectory.agents
+                    for s in t.steps
+                    if t.agent_id in samplers
+                ):
+                    continue
+                grade_dict = record["grade"]
+            else:
+                # Only the id and the problem text enter the workflow; the reference stays here.
+                trajectory = workflow.run(problem.problem_id, problem.problem)
+                grade_dict = self.grader.grade(problem, trajectory.final_answer_text).to_dict()
+            for trace in trajectory.agents:
+                if trace.agent_id in samplers:
+                    samplers[trace.agent_id].sample_steps(trace.steps)
+            self.store.write_json(rel, {"split": split, "trajectory": trajectory.model_dump(), "grade": grade_dict})
+            logger.info(
+                "generated",
+                extra={
+                    "split": split,
+                    "index": i,
+                    "problem_id": problem.problem_id,
+                    "label": grade_dict["label"],
+                },
+            )
 
     def score(self) -> None:
         estimators = build_estimators()
         scorers = build_token_scorers(self.backend_factory)
         out_dir = self.scored_dir()
         rows, step_rows = [], []
-        for split, problems in self.problems().items():
-            for problem in problems:
-                name = safe_name(problem.problem_id)
-                rel = f"{out_dir}/steps/{name}.json"
-                if get_settings().experiment.resume and self.store.exists(rel):
-                    record = self.store.read_json(rel)
-                else:
-                    raw = self.store.read_json(f"{self.generation_dir()}/trajectories/{name}.json")
-                    scored = score_trajectory(Trajectory.model_validate(raw["trajectory"]), estimators, scorers)
-                    record = {**raw, "trajectory": scored.model_dump()}
-                    self.store.write_json(rel, record)
-                trajectory = Trajectory.model_validate(record["trajectory"])
-                step_rows.extend(step_metric_rows(trajectory))
-                rows.append(
-                    {
-                        "problem_id": problem.problem_id,
-                        "split": split,
-                        "features": extract_features(trajectory),
-                        "label": record["grade"]["label"],
-                        "parse_failure": record["grade"]["parse_failure"],
-                        "tool_metadata": tool_metadata(trajectory),
-                    }
-                )
+        for split, _, problem in self._each_problem("score"):
+            name = safe_name(problem.problem_id)
+            rel = f"{out_dir}/steps/{name}.json"
+            if get_settings().experiment.resume and self.store.exists(rel):
+                record = self.store.read_json(rel)
+            else:
+                raw = self.store.read_json(f"{self.generation_dir()}/trajectories/{name}.json")
+                scored = score_trajectory(Trajectory.model_validate(raw["trajectory"]), estimators, scorers)
+                record = {**raw, "trajectory": scored.model_dump()}
+                self.store.write_json(rel, record)
+            trajectory = Trajectory.model_validate(record["trajectory"])
+            step_rows.extend(step_metric_rows(trajectory))
+            rows.append(
+                {
+                    "problem_id": problem.problem_id,
+                    "split": split,
+                    "features": extract_features(trajectory),
+                    "label": record["grade"]["label"],
+                    "parse_failure": record["grade"]["parse_failure"],
+                    "tool_metadata": tool_metadata(trajectory),
+                }
+            )
         self.store.write_json(f"{out_dir}/step_metrics.json", step_rows)
         self.store.write_json(f"{out_dir}/features.json", rows)
         logger.info("scored", extra={"problems": len(rows)})

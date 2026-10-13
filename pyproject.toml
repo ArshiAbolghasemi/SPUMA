@@ -25,6 +25,7 @@ dependencies = [
     "scikit-learn>=1.9.1",
     "spflow>=1.1.0",
     "sympy>=1.14.0",
+    "tqdm>=4.67",
     "transformers>=5.10.4,<5.18", # see override-dependencies (uqlm, vllm)
     "uqlm==0.6.7", # caps transformers/datasets <5: see override-dependencies
 ]

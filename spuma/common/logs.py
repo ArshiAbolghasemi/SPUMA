@@ -7,8 +7,12 @@ run id set by `set_run_id`. Third-party chatter is capped at WARNING.
 import json
 import logging
 import sys
+from collections.abc import Iterable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
+
+from tqdm import tqdm
+from tqdm.contrib.logging import logging_redirect_tqdm
 
 from spuma.config import get_settings
 
@@ -71,3 +75,10 @@ def setup_logging(run_name: str = "spuma") -> Path | None:
     for name in NOISY_LOGGERS:
         logging.getLogger(name).setLevel(logging.WARNING)
     return log_file
+
+
+def progress[T](items: Iterable[T], total: int, desc: str) -> Iterator[T]:
+    """Iterate with a tqdm progress bar (count, rate, ETA). Console log lines are printed above the bar
+    instead of breaking it; the bar is hidden when stderr is not a terminal (log files, CI, tests)."""
+    with logging_redirect_tqdm():
+        yield from tqdm(items, total=total, desc=desc, unit="problem", dynamic_ncols=True, disable=None)
