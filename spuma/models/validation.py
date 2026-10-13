@@ -8,7 +8,8 @@ import logging
 from typing import Any
 
 from spuma.config import get_settings
-from spuma.models.backend import BackendCapabilityError, backend_class
+from spuma.models.backend import BackendCapabilityError
+from spuma.models.engines import backend_class
 
 logger = logging.getLogger(__name__)
 

@@ -3,17 +3,17 @@ import dataclasses
 import pytest
 
 from spuma.config import Settings
-from spuma.models import backend as backend_module
+from spuma.models import engines as engines_module
+from spuma.models import vllm_backend as vllm_module
 from spuma.models.backend import (
     BackendCapabilities,
     BackendCapabilityError,
     generation_logprob_mode,
-    get_backend,
-    release_backends,
     require,
     scorer_id,
 )
 from spuma.models.config import ModelConfig, VLLMBackendConfig
+from spuma.models.engines import get_backend, release_backends
 from spuma.models.validation import execution_plan, validate_backends
 
 
@@ -39,8 +39,8 @@ class _Fake:
 
 
 def test_engine_reuse_and_release(monkeypatch):
-    monkeypatch.setattr(backend_module, "_INSTANCES", {})
-    monkeypatch.setitem(backend_module._CLASSES, "transformers", _Fake)
+    monkeypatch.setattr(engines_module, "_INSTANCES", {})
+    monkeypatch.setitem(engines_module.BACKENDS, "transformers", _Fake)
     _Fake.made.clear()
     cfg = ModelConfig()
     a = get_backend(cfg, "transformers")
@@ -49,7 +49,7 @@ def test_engine_reuse_and_release(monkeypatch):
     )
     assert a is b and len(_Fake.made) == 1  # generation settings do not create a new engine
     release_backends()
-    assert a.closed and not backend_module._INSTANCES
+    assert a.closed and not engines_module._INSTANCES
 
 
 def test_require_and_missing():
@@ -136,7 +136,7 @@ def test_validation_passes_for_transformers(with_model):
 
 
 def test_validation_fails_early_without_vllm(with_model, monkeypatch):
-    monkeypatch.setattr("importlib.util.find_spec", lambda name: None)
+    monkeypatch.setattr(vllm_module, "SamplingParams", None)  # vLLM not installed
     with_model(backend="vllm")
     with pytest.raises(BackendCapabilityError, match="vLLM is not installed"):
         validate_backends()

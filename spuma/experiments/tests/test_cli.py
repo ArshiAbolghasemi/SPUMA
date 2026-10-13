@@ -4,6 +4,7 @@ import sys
 import pytest
 
 from spuma.config import PROJECT_ROOT
+from spuma.experiments.runner import ExperimentRunner
 
 
 def test_cli_help():
@@ -21,7 +22,6 @@ def test_cli_help():
 @pytest.mark.gpu
 def test_real_qwen3_math_smoke(config, set_settings, tmp_path):
     """Phase 11: a real Qwen3-8B run on one MATH problem (downloads the model and dataset)."""
-    from spuma.experiments.runner import ExperimentRunner
 
     raw = config.to_dict()
     raw["experiment"]["output_dir"] = str(tmp_path)

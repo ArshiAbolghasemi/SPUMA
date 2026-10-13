@@ -21,7 +21,6 @@ Distributions are never truncated: a position that does not carry the whole voca
 """
 
 import gc
-import importlib.util
 import logging
 import time
 from collections.abc import Iterator, Sequence
@@ -29,7 +28,9 @@ from importlib import metadata
 from typing import Any
 
 import numpy as np
+import torch
 from langchain_core.messages import BaseMessage
+from transformers import AutoTokenizer
 
 from spuma.common.config import to_plain
 from spuma.models.backend import (
@@ -41,11 +42,20 @@ from spuma.models.backend import (
     LogprobMode,
     ParsedOutput,
     TokenScores,
-    register_backend,
     scorer_id,
 )
 from spuma.models.chat import ChatFormatter
 from spuma.models.config import GenerationConfig, ModelConfig
+
+try:  # vLLM is optional (Linux + NVIDIA): without it, capabilities_for() reports it as not installed
+    from vllm import LLM, SamplingParams
+    from vllm.inputs import TokensPrompt
+except ImportError:
+    LLM = SamplingParams = TokensPrompt = None
+try:  # engine teardown helpers; absent in some vLLM layouts
+    from vllm.distributed.parallel_state import destroy_distributed_environment, destroy_model_parallel
+except ImportError:
+    destroy_distributed_environment = destroy_model_parallel = None
 
 logger = logging.getLogger(__name__)
 
@@ -62,10 +72,8 @@ class VLLMBackend:
 
     @staticmethod
     def capabilities_for(config: ModelConfig) -> BackendCapabilities:
-        if importlib.util.find_spec("vllm") is None:
+        if SamplingParams is None:
             raise BackendCapabilityError(f"vLLM is not installed: {INSTALL_HINT}")
-        from vllm import SamplingParams
-
         missing = [f for f in REQUIRED_SAMPLING_FIELDS if f not in _sampling_fields(SamplingParams)]
         if missing:
             raise BackendCapabilityError(f"installed vLLM {_version()} lacks SamplingParams fields {missing}")
@@ -119,10 +127,6 @@ class VLLMBackend:
     @classmethod
     def from_config(cls, config: ModelConfig) -> VLLMBackend:
         cls.capabilities_for(config)  # fail fast before allocating the GPU
-        from transformers import AutoTokenizer
-        from vllm import LLM, SamplingParams
-        from vllm.inputs import TokensPrompt
-
         vc = config.vllm
         tokenizer_revision = config.tokenizer_revision or config.revision
         start = time.perf_counter()
@@ -307,16 +311,10 @@ class VLLMBackend:
         if engine_core is not None and hasattr(engine_core, "shutdown"):
             engine_core.shutdown()
         del llm
-        try:
-            from vllm.distributed.parallel_state import destroy_distributed_environment, destroy_model_parallel
-
+        if destroy_model_parallel is not None:
             destroy_model_parallel()
             destroy_distributed_environment()
-        except ImportError:
-            pass
         gc.collect()
-        import torch
-
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
@@ -341,6 +339,3 @@ def _version() -> str | None:
         return metadata.version("vllm")
     except metadata.PackageNotFoundError:
         return None
-
-
-register_backend("vllm", VLLMBackend)

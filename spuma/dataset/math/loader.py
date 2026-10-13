@@ -6,6 +6,8 @@ Problem ids are stable: `math/<official split>/<subject>/<row>`.
 import logging
 from typing import Any
 
+from datasets import load_dataset
+
 from spuma.config import get_settings
 from spuma.dataset.base import Problem, load_hf_rows, make_splits
 
@@ -18,8 +20,6 @@ class MathDataset:
     def __init__(self, loader: Any = None) -> None:
         self.config = get_settings().dataset
         if loader is None:
-            from datasets import load_dataset
-
             loader = load_dataset
         self.loader = loader
 

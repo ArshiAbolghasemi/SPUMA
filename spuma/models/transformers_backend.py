@@ -19,6 +19,7 @@ from typing import Any
 
 import torch
 from langchain_core.messages import BaseMessage
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from spuma.common.config import to_plain
 from spuma.models.backend import (
@@ -28,7 +29,6 @@ from spuma.models.backend import (
     GenerationResult,
     ParsedOutput,
     TokenScores,
-    register_backend,
     scorer_id,
 )
 from spuma.models.chat import ChatFormatter
@@ -92,7 +92,6 @@ class TransformersBackend:
 
     @classmethod
     def from_config(cls, config: ModelConfig) -> TransformersBackend:
-        from transformers import AutoModelForCausalLM, AutoTokenizer
 
         tc = config.transformers
         device = resolve_device(tc.device)
@@ -240,6 +239,3 @@ def gpu_memory() -> dict[str, float]:
         "gpu_allocated_gib": round(torch.cuda.memory_allocated() / gib, 3),
         "gpu_peak_gib": round(torch.cuda.max_memory_allocated() / gib, 3),
     }
-
-
-register_backend("transformers", TransformersBackend)

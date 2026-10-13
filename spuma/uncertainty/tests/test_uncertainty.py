@@ -2,11 +2,12 @@ import dataclasses
 import math
 
 import pytest
+from langchain_core.messages import HumanMessage
 
 from spuma.agents.trajectory import AgentTrace, StepRecord, Trajectory
 from spuma.features import extract_features, tool_metadata
 from spuma.models.backend import BackendCapabilities, BackendCapabilityError, GenerationRequest, scorer_id
-from spuma.models.config import ModelConfig
+from spuma.models.config import GenerationConfig, ModelConfig
 from spuma.uncertainty.aggregation import aggregate_agent, mean, rms
 from spuma.uncertainty.estimators import (
     MissingScoresError,
@@ -63,9 +64,6 @@ def test_missing_scores_raise_instead_of_fabricating():
 
 
 def test_real_backend_pe_nll_alignment(tiny_backend):
-    from langchain_core.messages import HumanMessage
-
-    from spuma.models.config import GenerationConfig
 
     prompt = tiny_backend.render([HumanMessage("Solve for x")], None)
     request = GenerationRequest(prompt, GenerationConfig(temperature=0.7, max_new_tokens=6), seed=3, logprobs="full")

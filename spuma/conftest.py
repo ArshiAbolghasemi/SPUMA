@@ -6,12 +6,18 @@ causal LM (no downloads, CPU), and a scripted backend that replays fixed outputs
 
 import math
 import os
+import re
+import time
+import types
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 import pytest
 import torch
+import uqlm.scorers.shortform.black_box as black_box
+import uqlm.scorers.shortform.entropy as entropy
+import yaml
 from langchain_core.messages import BaseMessage
 from tokenizers import Tokenizer, decoders, models, pre_tokenizers, trainers
 from transformers import PreTrainedTokenizerFast, Qwen3Config, Qwen3ForCausalLM
@@ -31,6 +37,7 @@ from spuma.models.backend import (
 from spuma.models.chat import parse_qwen_output, to_chat_dicts
 from spuma.models.config import ModelConfig, TransformersBackendConfig
 from spuma.models.transformers_backend import TransformersBackend
+from spuma.uncertainty import estimators
 
 CORPUS = [
     "Solve for x: 2x + 3 = 7. The answer is \\boxed{2}.",
@@ -78,7 +85,6 @@ def set_settings(monkeypatch):
 
 @pytest.fixture
 def raw_config() -> dict[str, Any]:
-    import yaml
 
     return yaml.safe_load(Path(settings_module.DEFAULT_SETTINGS_FILE).read_text())
 
@@ -243,7 +249,6 @@ def pytest_collection_modifyitems(config, items):
     Any other invocation, including a bare `pytest` or a `-m` filter that simply does not mention a
     marker, skips them, so no test run downloads a model by accident.
     """
-    import re
 
     if os.environ.get("SPUMA_TESTS_ALL") == "1":
         return
@@ -270,7 +275,6 @@ class RuleNLI:
 
     @staticmethod
     def _final_number(text: str):
-        import re
 
         nums = re.findall(r"-?\d+(?:\.\d+)?", text)
         return float(nums[-1]) if nums else None
@@ -292,16 +296,10 @@ def rule_nli(request, monkeypatch):
     if request.node.get_closest_marker("nli"):
         return None
     nli = RuleNLI()
-    from spuma.uncertainty import estimators
 
     real = estimators.load_black_box_uq
 
     def load():
-        import time
-        import types
-
-        import uqlm.scorers.shortform.black_box as black_box
-        import uqlm.scorers.shortform.entropy as entropy
 
         # UQLM's SemanticEntropy.score ends with a fixed time.sleep(0.1); skip it in tests only
         monkeypatch.setattr(entropy, "time", types.SimpleNamespace(sleep=lambda s: None, time=time.time))

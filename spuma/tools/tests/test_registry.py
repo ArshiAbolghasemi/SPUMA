@@ -1,5 +1,6 @@
 import dataclasses
 import json
+import time
 
 import pytest
 
@@ -135,7 +136,6 @@ def test_save_results_off(registry, config, set_settings):
 
 
 def _slow(seconds: float) -> dict:
-    import time
 
     time.sleep(seconds)
     return {"status": "success"}

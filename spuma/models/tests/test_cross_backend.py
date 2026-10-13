@@ -14,7 +14,9 @@ import numpy as np
 import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from spuma.models.config import ModelConfig, TransformersBackendConfig, VLLMBackendConfig
+from spuma.models.backend import GenerationRequest
+from spuma.models.config import GenerationConfig, ModelConfig, TransformersBackendConfig, VLLMBackendConfig
+from spuma.models.engines import get_backend, release_backends
 from spuma.uncertainty.aggregation import rms
 
 logger = logging.getLogger(__name__)
@@ -52,7 +54,6 @@ def test_offline_vllm_path_matches_transformers(tiny_backend, vllm_backend):
 
 @pytest.mark.vllm
 def test_real_vllm_matches_transformers_qwen3_small():
-    from spuma.models.backend import get_backend, release_backends
 
     cfg = ModelConfig(
         name="Qwen/Qwen3-0.6B",
@@ -80,8 +81,6 @@ def test_real_vllm_matches_transformers_qwen3_small():
 
 @pytest.mark.vllm
 def test_real_vllm_qwen3_8b_sampling_and_logprobs():
-    from spuma.models.backend import GenerationRequest, get_backend, release_backends
-    from spuma.models.config import GenerationConfig
 
     backend = get_backend(ModelConfig(backend="vllm"), "vllm")
     prompt = backend.render([HumanMessage("What is 2+2? Answer with \\boxed{}.")], None)

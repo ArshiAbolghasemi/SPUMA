@@ -1,10 +1,12 @@
 import dataclasses
 import json
+import os
+from pathlib import Path
 
 import pytest
 import yaml
 
-from spuma.config import SETTINGS_FILE_ENV, Settings, get_settings, load_settings
+from spuma.config import PROJECT_ROOT, SETTINGS_FILE_ENV, Settings, get_settings, load_settings
 from spuma.config.settings import _redact
 
 
@@ -158,16 +160,12 @@ def test_dotenv_exported_not_in_config(tmp_path, monkeypatch):
     env = tmp_path / ".env"
     env.write_text("HF_TOKEN=hf_secret\n")
     config = load_settings(dotenv_path=env)
-    import os
 
     assert os.environ["HF_TOKEN"] == "hf_secret"
     assert "hf_secret" not in json.dumps(config.sanitized())
 
 
 def test_only_one_yaml_file():
-    from pathlib import Path
-
-    from spuma.config import PROJECT_ROOT
 
     found = [p for p in Path(PROJECT_ROOT).rglob("*.y*ml") if ".venv" not in p.parts and "artifacts" not in p.parts]
     assert [p.name for p in found] == ["config-qwen-math.yaml"], found

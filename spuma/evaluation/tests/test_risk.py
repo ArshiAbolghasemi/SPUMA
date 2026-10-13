@@ -3,6 +3,7 @@ import dataclasses
 import numpy as np
 import pytest
 
+from spuma.config import Settings
 from spuma.evaluation.risk import RISK_MODELS, risk_model_spec
 from spuma.spn.model import ClassConditionalSPN
 
@@ -26,8 +27,6 @@ def test_unknown_risk_model():
 
 
 def test_config_only_accepts_registered_models(raw_config):
-
-    from spuma.config import Settings
 
     raw_config["evaluation"]["risk_models"] = ["xgboost"]
     with pytest.raises((ValueError, TypeError)):

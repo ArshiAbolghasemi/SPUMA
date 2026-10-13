@@ -7,6 +7,8 @@ to it (grading lives in `spuma.dataset.math.grading`).
 from typing import Any
 
 from langchain_core.tools import BaseTool, tool
+from math_verify import parse as mv_parse
+from math_verify import verify as mv_verify
 from pydantic import BaseModel, Field
 
 from spuma.tools.math.expressions import error
@@ -20,8 +22,6 @@ class VerifyInput(BaseModel):
 
 def verify(expression_a: str, expression_b: str) -> dict[str, Any]:
     """Runs in the isolated worker; never raises."""
-    from math_verify import parse as mv_parse
-    from math_verify import verify as mv_verify
 
     try:
         a, b = mv_parse(_wrap(expression_a)), mv_parse(_wrap(expression_b))

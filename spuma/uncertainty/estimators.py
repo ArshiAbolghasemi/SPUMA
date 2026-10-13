@@ -18,6 +18,8 @@ import math
 from collections.abc import Callable
 from typing import Any, Protocol
 
+from uqlm import BlackBoxUQ
+
 from spuma.agents.trajectory import StepRecord, Trajectory
 from spuma.common.config import to_plain
 from spuma.common.utils import derive_seed, stable_hash
@@ -173,8 +175,6 @@ class SemanticSampler:
 
 def load_black_box_uq() -> Any:
     """UQLM `BlackBoxUQ` with the `semantic_negentropy` scorer (loads the NLI model)."""
-    from uqlm import BlackBoxUQ
-
     config = _se()
     return BlackBoxUQ(
         llm=None,  # responses come from SPUMA's backends; UQLM only scores them

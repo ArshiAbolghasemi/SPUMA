@@ -5,8 +5,11 @@ import pytest
 import torch
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from spuma.models.backend import GenerationRequest, GenerationResult, ModelBackend, get_backend
+from spuma.conftest import TINY_CONFIG
+from spuma.models.backend import GenerationRequest, GenerationResult, ModelBackend
 from spuma.models.config import GenerationConfig, ModelConfig
+from spuma.models.engines import get_backend
+from spuma.models.transformers_backend import TransformersBackend
 
 GREEDY = GenerationConfig(temperature=0.0, max_new_tokens=8)
 SAMPLE = GenerationConfig(temperature=0.7, top_p=0.9, max_new_tokens=8)
@@ -121,8 +124,6 @@ def test_token_count_and_truncate(tiny_backend):
 
 
 def test_close_releases_model(tiny_model, tokenizer):
-    from spuma.conftest import TINY_CONFIG
-    from spuma.models.transformers_backend import TransformersBackend
 
     backend = TransformersBackend(tiny_model, tokenizer, TINY_CONFIG)
     backend.close()

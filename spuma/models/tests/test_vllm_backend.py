@@ -1,12 +1,12 @@
 """vLLM backend logic against the fake `vllm` module (real raw log-probs from a tiny HF model)."""
 
 import dataclasses
-import sys
 
 import numpy as np
 import pytest
 from langchain_core.messages import HumanMessage
 
+from spuma.models import vllm_backend as vllm_module
 from spuma.models.backend import BackendCapabilityError, GenerationRequest, ModelBackend
 from spuma.models.config import GenerationConfig, ModelConfig, VLLMBackendConfig
 from spuma.models.tests import fake_vllm
@@ -21,8 +21,7 @@ def _prompt(b):
 
 
 def test_capabilities_require_installed_vllm(monkeypatch):
-    monkeypatch.setitem(sys.modules, "vllm", None)  # import fails
-    monkeypatch.setattr("importlib.util.find_spec", lambda name: None)
+    monkeypatch.setattr(vllm_module, "SamplingParams", None)  # what a failed `import vllm` leaves
     with pytest.raises(BackendCapabilityError, match="not installed"):
         VLLMBackend.capabilities_for(ModelConfig(backend="vllm"))
 
@@ -38,7 +37,7 @@ def test_capabilities_reject_incompatible_version(fake_vllm_module, monkeypatch)
     class Old:
         __dataclass_fields__ = {"n": None, "seed": None}
 
-    monkeypatch.setattr(fake_vllm_module, "SamplingParams", Old)
+    monkeypatch.setattr(vllm_module, "SamplingParams", Old)
     with pytest.raises(BackendCapabilityError, match="lacks SamplingParams fields"):
         VLLMBackend.capabilities_for(ModelConfig(backend="vllm"))
 

@@ -50,9 +50,10 @@ from spuma.dataset.registry import get_dataset, get_grader
 from spuma.evaluation.metrics import binary_entropy, evaluate
 from spuma.evaluation.risk import risk_model_spec
 from spuma.features import extract_features, tool_metadata
-from spuma.models.backend import ModelBackend, get_backend, release_backends
+from spuma.models.backend import ModelBackend
 from spuma.models.batching import MicroBatcher
 from spuma.models.config import ModelConfig
+from spuma.models.engines import get_backend, release_backends
 from spuma.models.validation import validate_backends
 from spuma.tools.registry import ToolExecutor, ToolProvider, build_tool_registry, default_providers
 from spuma.tools.worker import IsolatedRunner

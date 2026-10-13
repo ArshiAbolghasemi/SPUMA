@@ -6,6 +6,7 @@ next call starts a fresh one. On Linux the worker also gets an address-space lim
 
 import logging
 import multiprocessing as mp
+import resource
 import sys
 import threading
 from collections.abc import Callable
@@ -20,8 +21,6 @@ class ToolTimeout(TimeoutError):
 
 def _limit_memory(memory_mb: int) -> None:
     if sys.platform == "linux":
-        import resource
-
         limit = memory_mb * 1024 * 1024
         resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
 

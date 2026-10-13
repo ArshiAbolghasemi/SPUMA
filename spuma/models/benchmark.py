@@ -21,19 +21,20 @@ import time
 from datetime import UTC, datetime
 from typing import Any
 
+import torch
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from spuma.artifacts import FileArtifactStore
 from spuma.common.logs import setup_logging
 from spuma.config import PROJECT_ROOT, SETTINGS_FILE_ENV, get_settings
 from spuma.dataset.registry import get_dataset
-from spuma.models.backend import GenerationRequest, ModelBackend, get_backend, release_backends
+from spuma.models.backend import GenerationRequest, ModelBackend
+from spuma.models.engines import get_backend, release_backends
 
 logger = logging.getLogger("spuma.models.benchmark")
 
 
 def _gpu() -> dict[str, float]:
-    import torch
 
     if not torch.cuda.is_available():
         return {}
