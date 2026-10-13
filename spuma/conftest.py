@@ -16,7 +16,7 @@ from langchain_core.messages import BaseMessage
 from tokenizers import Tokenizer, decoders, models, pre_tokenizers, trainers
 from transformers import PreTrainedTokenizerFast, Qwen3Config, Qwen3ForCausalLM
 
-from spuma.config import Settings, load_settings
+from spuma.config import Settings, get_settings
 from spuma.config import loader as config_loader
 from spuma.models.backend import (
     BackendCapabilities,
@@ -52,12 +52,27 @@ def isolated_env(tmp_path, monkeypatch):
     for var in [v for v in os.environ if v.startswith("SPUMA_")] + ["HF_TOKEN"]:
         monkeypatch.setenv(var, "")  # record the original so teardown restores it (load_dotenv writes os.environ)
         monkeypatch.delenv(var)
+    get_settings.cache_clear()  # every test starts from a fresh load of the real config file
+    yield
+    get_settings.cache_clear()
 
 
 @pytest.fixture
 def config() -> Settings:
-    """The real project config/config-qwen-math.yaml (validates it on every run)."""
-    return load_settings()
+    """The process-wide settings (`get_settings()`): the real config/config-qwen-math.yaml."""
+    return get_settings()
+
+
+@pytest.fixture
+def set_settings(monkeypatch):
+    """Make `get_settings()` return the given settings for this test (code reads settings, never receives them)."""
+
+    def install(settings: Settings) -> Settings:
+        monkeypatch.setattr(config_loader, "load_settings", lambda *args, **kwargs: settings)
+        get_settings.cache_clear()
+        return settings
+
+    return install
 
 
 @pytest.fixture
@@ -280,7 +295,7 @@ def rule_nli(request, monkeypatch):
 
     real = estimators.load_black_box_uq
 
-    def load(config):
+    def load():
         import time
         import types
 
@@ -291,7 +306,7 @@ def rule_nli(request, monkeypatch):
         monkeypatch.setattr(entropy, "time", types.SimpleNamespace(sleep=lambda s: None, time=time.time))
         with pytest.MonkeyPatch.context() as m:  # real BlackBoxUQ, rule NLI instead of the DeBERTa download
             m.setattr(black_box, "NLI", lambda **kwargs: nli)
-            return real(config)
+            return real()
 
     monkeypatch.setattr(estimators, "load_black_box_uq", load)
     return nli

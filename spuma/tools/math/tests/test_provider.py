@@ -10,11 +10,12 @@ def test_one_module_per_tool():
     assert modules == {f"spuma.tools.math.{n}" for n in [*SYMPY_TOOLS, *VERIFY_TOOLS]}
 
 
-def test_provider_builds_configured_tools(runner):
-    provider = MathToolProvider(runner, SYMPY_TOOLS)
-    assert provider.build("sympy_solve", ToolConfig(provider="sympy")).name == "sympy_solve"
+def test_provider_builds_configured_tools(runner, config, set_settings):
     # a registry entry may expose an operation under another name
-    renamed = provider.build("solve", ToolConfig(provider="sympy", operation="sympy_solve"))
-    assert renamed.name == "solve"
+    entries = {**config.tools.registry, "solve": ToolConfig(provider="sympy", operation="sympy_solve")}
+    set_settings(config.replace(tools=config.tools.model_copy(update={"registry": entries})))
+    provider = MathToolProvider(runner, SYMPY_TOOLS)
+    assert provider.build("sympy_solve").name == "sympy_solve"
+    assert provider.build("solve").name == "solve"
     with pytest.raises(ToolUnavailable):
-        provider.build("math_verify", ToolConfig(provider="sympy"))  # wrong provider
+        provider.build("math_verify")  # registered, but not a SymPy operation

@@ -41,8 +41,9 @@ from spuma.agents.trajectory import Trajectory
 from spuma.agents.workflow import build_workflow
 from spuma.artifacts import FileArtifactStore
 from spuma.common.utils import safe_name
-from spuma.config import PROJECT_ROOT, Settings
-from spuma.dataset import AnswerGrader, DatasetProvider, Problem, get_dataset, get_grader
+from spuma.config import PROJECT_ROOT, get_settings
+from spuma.dataset.base import AnswerGrader, DatasetProvider, Problem
+from spuma.dataset.registry import get_dataset, get_grader
 from spuma.evaluation.metrics import binary_entropy, evaluate
 from spuma.evaluation.risk import risk_model_spec
 from spuma.features import extract_features, tool_metadata
@@ -66,44 +67,46 @@ SPLITS = ("train", "validation", "test")
 
 
 class ExperimentRunner:
+    """Runs the experiment described by `get_settings()`; tool-use variants via `get_settings(variant)`."""
+
     def __init__(
         self,
-        config: Settings,
         dataset: DatasetProvider | None = None,
         backend_factory: Callable[[ModelConfig, str], ModelBackend] = get_backend,
         providers: dict[str, ToolProvider] | None = None,
         grader: AnswerGrader | None = None,
         release: Callable[[], None] = release_backends,
     ) -> None:
-        self.config = config
+        config = get_settings()
         self.release = release
-        self.dataset = dataset or get_dataset(config.dataset)
+        self.dataset = dataset or get_dataset()
         self.backend_factory = backend_factory
         self._runner = IsolatedRunner() if providers is None else None
         self.providers = providers if providers is not None else default_providers(self._runner)
-        self.grader = grader or get_grader(config.dataset)
+        self.grader = grader or get_grader()
         self.store = FileArtifactStore(PROJECT_ROOT / config.experiment.output_dir / config.experiment.name)
         self.run_id = f"{datetime.now(UTC):%Y%m%dT%H%M%S}-{uuid.uuid4().hex[:6]}"
 
     # --- layout ----------------------------------------------------------------------------------
 
     def variant_dir(self, variant: str) -> str:
-        return f"{variant}-{self.config.with_variant(variant).generation_fingerprint()}"
+        return f"{variant}-{get_settings(variant).generation_fingerprint()}"
 
     def scored_dir(self, variant: str) -> str:
-        return f"{self.variant_dir(variant)}/scored-{self.config.scoring_fingerprint()}"
+        return f"{self.variant_dir(variant)}/scored-{get_settings().scoring_fingerprint()}"
 
     # --- driver ----------------------------------------------------------------------------------
 
     def run(self, variants: list[str] | None = None, phases: list[str] | None = None, limit: int | None = None) -> None:
-        variants = variants or list(self.config.experiment.variants)
+        configured = list(get_settings().experiment.variants)
+        variants = variants or configured
         phases = phases or list(PHASES)
-        unknown = set(variants) - set(self.config.experiment.variants)
+        unknown = set(variants) - set(configured)
         if unknown:
-            raise ValueError(f"unknown variants {sorted(unknown)}; configured: {list(self.config.experiment.variants)}")
+            raise ValueError(f"unknown variants {sorted(unknown)}; configured: {configured}")
         # Fail before loading any model if a backend cannot provide what this experiment needs.
-        plans = {v: validate_backends(self.config.with_variant(v)) for v in variants}
-        self.store.write_json("config.json", self.config.sanitized())
+        plans = {v: validate_backends(v) for v in variants}
+        self.store.write_json("config.json", get_settings().sanitized())
         self.store.write_json(f"runs/{self.run_id}.json", self.metadata(variants, phases, limit, plans))
         try:
             if "generate" in phases:
@@ -129,7 +132,7 @@ class ExperimentRunner:
                 self._runner.close()
 
     def _hybrid(self) -> bool:
-        return any(not m.scores_at_generation for m in self.config.all_models().values())
+        return any(not m.scores_at_generation for m in get_settings().all_models().values())
 
     def metadata(
         self, variants: list[str], phases: list[str], limit: int | None, plans: dict[str, Any]
@@ -150,7 +153,7 @@ class ExperimentRunner:
             "sympy",
             "math-verify",
         ]
-        se = self.config.uncertainty.semantic_entropy
+        se = get_settings().uncertainty.semantic_entropy
         return {
             "run_id": self.run_id,
             "started": datetime.now(UTC).isoformat(),
@@ -158,7 +161,7 @@ class ExperimentRunner:
             "variants": variants,
             "phases": phases,
             "limit": limit,
-            "seed": self.config.project.seed,
+            "seed": get_settings().project.seed,
             "git_commit": commit,
             "python": platform.python_version(),
             "platform": platform.platform(),
@@ -174,7 +177,7 @@ class ExperimentRunner:
             },
             "variant_dirs": {v: self.variant_dir(v) for v in variants},
             "backends": {
-                "models": {k: m.model_dump(mode="json") for k, m in self.config.all_models().items()},
+                "models": {k: m.model_dump(mode="json") for k, m in get_settings().all_models().items()},
                 "plan": plans,
             },
         }
@@ -192,26 +195,26 @@ class ExperimentRunner:
             raise RuntimeError("no splits.json: run the generate phase first")
         return {k: [Problem(**p) for p in v] for k, v in self.store.read_json("splits.json").items()}
 
-    def _backends(self, config: Settings) -> dict[str, ModelBackend]:
+    def _backends(self) -> dict[str, ModelBackend]:
         """Generation engine per agent (shared by agents on the same model)."""
+        config = get_settings()
         return {
             a.id: self.backend_factory(config.model_for(a), config.model_for(a).backend) for a in config.agents.enabled
         }
 
     def generate(self, variant: str) -> None:
-        config = self.config.with_variant(variant)
-        backends = self._backends(config)
-        se = config.uncertainty.semantic_entropy
-        samplers = {a: SemanticSampler(b, se, config.project.seed) for a, b in backends.items()} if se.enabled else {}
-        registry = build_tool_registry(config.tools, self.providers)
+        backends = self._backends()
+        se_enabled = get_settings().uncertainty.semantic_entropy.enabled
+        samplers = {a: SemanticSampler(b) for a, b in backends.items()} if se_enabled else {}
+        registry = build_tool_registry(self.providers)
         first = next(iter(backends.values()))
-        executor = ToolExecutor(registry, config.tools.execution, truncate=first.truncate)
-        workflow = build_workflow(config, registry, backends.__getitem__, executor)
+        executor = ToolExecutor(registry, truncate=first.truncate)
+        workflow = build_workflow(registry, backends.__getitem__, executor, variant)
         self.store.write_json(f"{self.variant_dir(variant)}/agents.json", [a.describe() for a in workflow.agents])
         for split, problems in self.problems().items():
             for i, problem in enumerate(problems):
                 rel = f"{self.variant_dir(variant)}/trajectories/{safe_name(problem.problem_id)}.json"
-                if self.config.experiment.resume and self.store.exists(rel):
+                if get_settings().experiment.resume and self.store.exists(rel):
                     record = self.store.read_json(rel)
                     trajectory = Trajectory.model_validate(record["trajectory"])
                     if not any(
@@ -242,16 +245,15 @@ class ExperimentRunner:
                 )
 
     def score(self, variant: str) -> None:
-        config = self.config.with_variant(variant)
-        estimators = build_estimators(config)
-        scorers = build_token_scorers(config, self.backend_factory)
+        estimators = build_estimators()
+        scorers = build_token_scorers(self.backend_factory)
         out_dir = self.scored_dir(variant)
         rows, step_rows = [], []
         for split, problems in self.problems().items():
             for problem in problems:
                 name = safe_name(problem.problem_id)
                 rel = f"{out_dir}/steps/{name}.json"
-                if self.config.experiment.resume and self.store.exists(rel):
+                if get_settings().experiment.resume and self.store.exists(rel):
                     record = self.store.read_json(rel)
                 else:
                     raw = self.store.read_json(f"{self.variant_dir(variant)}/trajectories/{name}.json")
@@ -264,7 +266,7 @@ class ExperimentRunner:
                     {
                         "problem_id": problem.problem_id,
                         "split": split,
-                        "features": extract_features(trajectory, config),
+                        "features": extract_features(trajectory),
                         "label": record["grade"]["label"],
                         "parse_failure": record["grade"]["parse_failure"],
                         "tool_metadata": tool_metadata(trajectory),
@@ -276,7 +278,7 @@ class ExperimentRunner:
 
     def _matrix(self, variant: str, split: str) -> tuple[np.ndarray, np.ndarray, list[str]]:
         rows = [r for r in self.store.read_json(f"{self.scored_dir(variant)}/features.json") if r["split"] == split]
-        order = self.config.features.order
+        order = get_settings().features.order
         Z = np.array([[r["features"][f] for f in order] for r in rows], dtype=float).reshape(len(rows), len(order))
         return Z, np.array([r["label"] for r in rows], dtype=int), [r["problem_id"] for r in rows]
 
@@ -285,10 +287,10 @@ class ExperimentRunner:
 
     def train(self, variant: str) -> None:
         Z, y, _ = self._matrix(variant, "train")
-        for name in self.config.evaluation.risk_models:
+        for name in get_settings().evaluation.risk_models:
             status_rel = f"{self.scored_dir(variant)}/models/{name}_status.json"
             try:
-                model = risk_model_spec(name).build(self.config).fit(Z, y)
+                model = risk_model_spec(name).build().fit(Z, y)
             except ValueError as e:
                 logger.error("risk model training failed", extra={"variant": variant, "model": name, "error": str(e)})
                 self.store.write_json(status_rel, {"status": "failed", "error": str(e)})
@@ -300,12 +302,12 @@ class ExperimentRunner:
 
     def evaluate(self, variant: str, all_variants: list[str]) -> None:
         """Per risk model: P(Y=1|Z) metrics, posterior-entropy ranking metrics (separately), predictions."""
-        ev = self.config.evaluation
+        ev = get_settings().evaluation
         boot = (
             {
                 "iterations": ev.bootstrap.iterations,
                 "confidence": ev.bootstrap.confidence,
-                "seed": self.config.project.seed,
+                "seed": get_settings().project.seed,
             }
             if ev.bootstrap.enabled
             else None
@@ -333,7 +335,7 @@ class ExperimentRunner:
                     for i, t, a, b in zip(ids, y, p, h, strict=True)
                 ]
             result["splits"][split] = split_res
-        if models and self.config.experiment.spn_protocol == "cross_variant":
+        if models and get_settings().experiment.spn_protocol == "cross_variant":
             result["cross_variant_test"] = {name: {} for name in models}
             for other in all_variants:
                 if other == variant or not self.store.exists(f"{self.scored_dir(other)}/features.json"):

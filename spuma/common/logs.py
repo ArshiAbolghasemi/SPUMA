@@ -10,7 +10,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from spuma.common.config import LoggingConfig
+from spuma.config import get_settings
 
 PROJECT_LOGGER = "spuma"
 NOISY_LOGGERS = ("httpx", "httpcore", "urllib3", "filelock", "fsspec", "huggingface_hub", "asyncio", "datasets")
@@ -43,8 +43,9 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, default=str)
 
 
-def setup_logging(config: LoggingConfig, run_name: str = "spuma") -> Path | None:
-    """Configure the root logger; returns the log file path when file logging is on."""
+def setup_logging(run_name: str = "spuma") -> Path | None:
+    """Configure the root logger from the `logging:` settings; returns the log file path when file logging is on."""
+    config = get_settings().logging
     root = logging.getLogger()
     for h in list(root.handlers):
         root.removeHandler(h)

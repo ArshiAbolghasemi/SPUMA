@@ -7,7 +7,6 @@ from spuma.features import extract_features, tool_metadata
 from spuma.models.backend import BackendCapabilities, BackendCapabilityError, GenerationRequest, scorer_id
 from spuma.models.config import ModelConfig
 from spuma.uncertainty.aggregation import aggregate_agent, mean, rms
-from spuma.uncertainty.config import SemanticEntropyConfig
 from spuma.uncertainty.estimators import (
     MissingScoresError,
     NegativeLogLikelihood,
@@ -44,11 +43,12 @@ def _step(agent="solver", step_id=0, ids=(1, 2, 3, 4), lps=(-0.1, -0.2, -0.3, -0
     )
 
 
-def test_pe_nll_length_known_values():
+def test_pe_nll_length_known_values(with_uq):
     s = _step()
     assert PredictiveEntropy().estimate(s)[0] == pytest.approx(2.5)
     assert NegativeLogLikelihood().estimate(s)[0] == pytest.approx(0.25)
-    assert NegativeLogLikelihood(normalize_by_length=False).estimate(s)[0] == pytest.approx(1.0)
+    with_uq("nll", normalize_by_length=False)
+    assert NegativeLogLikelihood().estimate(s)[0] == pytest.approx(1.0)
     assert TokenLength().estimate(s)[0] == 4
 
 
@@ -76,9 +76,21 @@ def test_real_backend_pe_nll_alignment(tiny_backend):
     assert NegativeLogLikelihood().estimate(s)[0] == pytest.approx(-sum(lps) / len(lps))
 
 
-def _sampled(backend, step=None, config=None):
+@pytest.fixture
+def with_uq(config, set_settings):
+    """Install settings with `uncertainty.<section>` fields replaced, e.g. with_uq("nll", normalize_by_length=False)."""
+
+    def install(section, **fields):
+        uq = config.uncertainty
+        part = getattr(uq, section).model_copy(update=fields)
+        return set_settings(config.replace(uncertainty=uq.model_copy(update={section: part})))
+
+    return install
+
+
+def _sampled(backend, step=None):
     step = step or _step()
-    SemanticSampler(backend, config or SemanticEntropyConfig(), seed=42).sample_steps([step])
+    SemanticSampler(backend).sample_steps([step])
     return step
 
 
@@ -87,7 +99,7 @@ def test_semantic_entropy_uses_uqlm_on_step_text_plus_samples(scripted_backend_c
     samples = ["\\boxed{2}"] * 5 + ["so it is 2.0"] * 2 + ["\\boxed{3}"] * 2 + [CALL]
     backend = scripted_backend_cls([], samples={"": samples})
     step = _sampled(backend)
-    value, details = SemanticEntropy(SemanticEntropyConfig()).estimate(step)
+    value, details = SemanticEntropy().estimate(step)
     # 11 texts: {t}, {2 x5, 2.0 x2, tool call ending in "x = 2"}, {3 x2}  ->  1/11, 8/11, 2/11
     p = [1 / 11, 8 / 11, 2 / 11]
     assert value == pytest.approx(-sum(x * math.log(x) for x in p))
@@ -101,56 +113,58 @@ def test_semantic_entropy_uses_uqlm_on_step_text_plus_samples(scripted_backend_c
     assert step.token_ids == [1, 2, 3, 4] and step.text == "t"  # main trajectory untouched
 
 
-def test_semantic_samples_are_cached_and_batched(scripted_backend_cls):
+def test_semantic_samples_are_cached_and_batched(scripted_backend_cls, with_uq):
     backend = scripted_backend_cls([], samples={"": ["\\boxed{4}"] * 10})
-    sampler = SemanticSampler(backend, SemanticEntropyConfig(), seed=0)
+    sampler = SemanticSampler(backend)
     steps = [_step(step_id=0), _step(step_id=1)]
     sampler.sample_steps(steps)
     sampler.sample_steps(steps)  # already sampled: no new backend calls
     assert len(backend.calls) == 2 and not any(sampler.needs_samples(s) for s in steps)
     # step text "t" vs ten identical "\\boxed{4}" samples: clusters 1/11 and 10/11
     expected = -(1 / 11 * math.log(1 / 11) + 10 / 11 * math.log(10 / 11))
-    assert SemanticEntropy(SemanticEntropyConfig()).estimate(steps[0])[0] == pytest.approx(expected)
+    assert SemanticEntropy().estimate(steps[0])[0] == pytest.approx(expected)
     # a different SE configuration invalidates the stored samples
-    assert SemanticSampler(backend, SemanticEntropyConfig(temperature=1.0), seed=0).needs_samples(steps[0])
+    with_uq("semantic_entropy", temperature=1.0)
+    assert SemanticSampler(backend).needs_samples(steps[0])
 
 
 def test_semantic_entropy_from_fixed_texts_is_backend_independent():
     """Fixed texts give the same SE whichever backend sampled them; all agree -> 0."""
-    value, details = SemanticEntropy(SemanticEntropyConfig()).from_texts("x = 4", ["\\boxed{4}"] * 10)
+    value, details = SemanticEntropy().from_texts("x = 4", ["\\boxed{4}"] * 10)
     assert value == pytest.approx(0.0) and details["semantic_negentropy"] == pytest.approx(1.0)
 
 
 def test_trajectory_scored_in_one_uqlm_call(config, scripted_backend_cls, monkeypatch):
     backend = scripted_backend_cls([], samples={"": ["\\boxed{1}"] * 10})
     traj = _trajectory()
-    sampler = SemanticSampler(backend, config.uncertainty.semantic_entropy, seed=0)
+    sampler = SemanticSampler(backend)
     for a in traj.agents:
         for s in a.steps:
             s.metrics, s.scored_by = {}, backend.scorer_id
         sampler.sample_steps(a.steps)
-    ests = build_estimators(config)
+    ests = build_estimators()
     se = next(e for e in ests["solver"] if e.name == "se")
     calls = []
     real = se.uq.score
     monkeypatch.setattr(se.uq, "score", lambda **kw: calls.append(len(kw["responses"])) or real(**kw))
-    score_trajectory(traj, ests, build_token_scorers(config, lambda m, k: pytest.fail("scored")))
+    score_trajectory(traj, ests, build_token_scorers(lambda m, k: pytest.fail("scored")))
     assert calls == [3]  # 2 solver steps + 1 reviewer step, one call
 
 
 def test_one_nli_model_shared_by_agents(config, monkeypatch):
     loads = []
-    monkeypatch.setattr("spuma.uncertainty.estimators.load_black_box_uq", lambda c: loads.append(c) or object())
-    ests = build_estimators(config)
+    monkeypatch.setattr("spuma.uncertainty.estimators.load_black_box_uq", lambda: loads.append(1) or object())
+    ests = build_estimators()
     se = [e for e in ests["solver"] if e.name == "se"][0]
     assert se is [e for e in ests["reviewer"] if e.name == "se"][0] and loads == []  # lazy
     assert se.uq is se.uq and len(loads) == 1
 
 
 @pytest.mark.nli
-def test_real_deberta_nli_clusters_paraphrases():
+def test_real_deberta_nli_clusters_paraphrases(with_uq):
     """Real BlackBoxUQ + DeBERTa-MNLI: paraphrases of one answer score lower SE than two different answers."""
-    se = SemanticEntropy(SemanticEntropyConfig(n=3))
+    with_uq("semantic_entropy", n=3)
+    se = SemanticEntropy()
     same, _ = se.from_texts(
         "Subtracting 3 from both sides gives 2x = 4, so x = 2.",
         ["The answer is x = 2.", "x equals 2.", "Solving gives x = 2."],
@@ -161,13 +175,13 @@ def test_real_deberta_nli_clusters_paraphrases():
 
 def test_semantic_entropy_requires_stored_samples():
     with pytest.raises(MissingScoresError, match="generate phase"):
-        SemanticEntropy(SemanticEntropyConfig()).estimate(_step())
+        SemanticEntropy().estimate(_step())
 
 
 def test_sampler_requires_multiple_completions():
     backend = type("B", (), {"name": "nosample", "capabilities": BackendCapabilities()})()
     with pytest.raises(BackendCapabilityError):
-        SemanticSampler(backend, SemanticEntropyConfig(), seed=0)
+        SemanticSampler(backend)
 
 
 def test_semantic_entropy_rejects_short_sample_list(scripted_backend_cls):
@@ -201,12 +215,12 @@ def test_token_scorer_rejects_incompatible_engine(scripted_backend_cls):
         TokenScorer(tf.scorer_id, lambda: tf, full_vocabulary=False).ensure(step)
 
 
-def test_build_token_scorers_share_engine(config):
-    scorers = build_token_scorers(config, lambda m, kind: pytest.fail("lazy"))
+def test_build_token_scorers_share_engine(config, set_settings):
+    scorers = build_token_scorers(lambda m, kind: pytest.fail("lazy"))
     assert scorers["solver"] is scorers["reviewer"]
     assert scorers["solver"].scorer == scorer_id(config.model, "transformers") and scorers["solver"].full_vocabulary
-    hybrid = config.replace(model=ModelConfig(backend="vllm", scoring_backend="transformers"))
-    assert build_token_scorers(hybrid, lambda m, k: None)["solver"].scorer.startswith("transformers:")
+    set_settings(config.replace(model=ModelConfig(backend="vllm", scoring_backend="transformers")))
+    assert build_token_scorers(lambda m, k: None)["solver"].scorer.startswith("transformers:")
 
 
 def test_aggregation_known_values():
@@ -247,7 +261,7 @@ def _trajectory():
 
 
 def test_features_order_and_values(config):
-    feats = extract_features(_trajectory(), config)
+    feats = extract_features(_trajectory())
     assert list(feats) == config.features.order
     assert feats["solver_pe"] == pytest.approx(math.sqrt(12.5))
     assert feats["solver_length"] == 20  # mean, not RMS
@@ -257,25 +271,26 @@ def test_features_order_and_values(config):
 def test_tool_metadata_separate_from_features(config):
     meta = tool_metadata(_trajectory())
     assert meta["solver"]["tool_calls"] == 1 and meta["reviewer"]["tool_calls"] == 0
-    assert not any("tool" in k for k in extract_features(_trajectory(), config))
+    assert not any("tool" in k for k in extract_features(_trajectory()))
 
 
-def test_aggregate_unknown_strategy(config):
+def test_aggregate_unknown_strategy(config, set_settings):
     with pytest.raises(ValueError):
-        aggregate_agent(_trajectory().agents[0], config.aggregation.model_copy(update={"nll": "median"}), ["nll"])
+        set_settings(config.replace(aggregation=config.aggregation.model_copy(update={"nll": "median"})))
+        aggregate_agent(_trajectory().agents[0], ["nll"])
 
 
 def test_score_trajectory_and_rows(config, scripted_backend_cls):
     backend = scripted_backend_cls([], samples={"": ["\\boxed{1}"] * 10})
     traj = _trajectory()
-    sampler = SemanticSampler(backend, config.uncertainty.semantic_entropy, seed=0)
+    sampler = SemanticSampler(backend)
     for a in traj.agents:
         for s in a.steps:
             s.metrics = {}
             s.scored_by = backend.scorer_id
         sampler.sample_steps(a.steps)
-    scorers = build_token_scorers(config, lambda m, kind: pytest.fail("already scored at generation"))
-    scored = score_trajectory(traj, build_estimators(config), scorers)
+    scorers = build_token_scorers(lambda m, kind: pytest.fail("already scored at generation"))
+    scored = score_trajectory(traj, build_estimators(), scorers)
     rows = step_metric_rows(scored)
     assert set(rows[0]["metrics"]) == {"pe", "se", "nll", "length"}
     assert rows[0]["tool_calls"] == [{"tool": "sympy_solve", "status": "success"}]

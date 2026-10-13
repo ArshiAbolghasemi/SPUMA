@@ -16,8 +16,8 @@ from typing import Any
 from langchain_core.tools import BaseTool, tool
 from pydantic import BaseModel, Field
 
+from spuma.config import get_settings
 from spuma.tools.base import ToolUnavailable
-from spuma.tools.config import ToolConfig
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +103,8 @@ class PythonInput(BaseModel):
 class PythonSandboxProvider:
     """`provider: python_sandbox` registry entries -> the `python_execute` LangChain tool (Docker only)."""
 
-    def build(self, name: str, config: ToolConfig) -> BaseTool:
+    def build(self, name: str) -> BaseTool:
+        config = get_settings().tools.registry[name]
         opts = config.options
         sandbox = DockerSandbox(
             image=opts.get("image", "python:3.12-slim"),

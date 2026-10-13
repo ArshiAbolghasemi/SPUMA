@@ -8,7 +8,7 @@ import re
 import pytest
 
 from spuma.conftest import ALL_CAPABILITIES
-from spuma.dataset import Problem
+from spuma.dataset.base import Problem
 from spuma.experiments.runner import ExperimentRunner
 from spuma.models.backend import BackendInfo, GenerationResult, TokenScores, scorer_id
 from spuma.models.chat import parse_qwen_output, to_chat_dicts
@@ -169,12 +169,10 @@ def fake_capabilities(monkeypatch):
     monkeypatch.setattr("spuma.models.validation.backend_class", lambda kind: cls)
 
 
-def test_full_pipeline(config, tmp_path, runner_proc, fake_capabilities):
-    cfg = _config(config, tmp_path)
+def test_full_pipeline(config, set_settings, tmp_path, runner_proc, fake_capabilities):
+    cfg = set_settings(_config(config, tmp_path))
     engines = Engines()
-    runner = ExperimentRunner(
-        cfg, FakeDataset(), engines.factory, default_providers(runner_proc), release=engines.release
-    )
+    runner = ExperimentRunner(FakeDataset(), engines.factory, default_providers(runner_proc), release=engines.release)
     runner.run()
     store = runner.store
     assert [e[:2] for e in engines.events] == [("load", "transformers")]  # one engine shared by both agents
@@ -231,18 +229,16 @@ def test_full_pipeline(config, tmp_path, runner_proc, fake_capabilities):
 
     # resume: nothing is regenerated or rescored
     calls = model.calls
-    ExperimentRunner(cfg, FakeDataset(), engines.factory, default_providers(runner_proc), release=engines.release).run()
+    ExperimentRunner(FakeDataset(), engines.factory, default_providers(runner_proc), release=engines.release).run()
     assert model.calls == calls and model.score_calls == 0
 
 
 @pytest.mark.parametrize(("backend", "scoring"), [("vllm", "same"), ("vllm", "transformers")])
-def test_backend_modes(config, tmp_path, runner_proc, fake_capabilities, backend, scoring):
+def test_backend_modes(config, set_settings, tmp_path, runner_proc, fake_capabilities, backend, scoring):
     """vLLM-only and hybrid (vLLM generation, Transformers scoring) produce the same downstream pipeline."""
-    cfg = _config(config, tmp_path, backend, scoring)
+    set_settings(_config(config, tmp_path, backend, scoring))
     engines = Engines()
-    runner = ExperimentRunner(
-        cfg, FakeDataset(), engines.factory, default_providers(runner_proc), release=engines.release
-    )
+    runner = ExperimentRunner(FakeDataset(), engines.factory, default_providers(runner_proc), release=engines.release)
     runner.run(variants=["both_tools"])
     gen = next(e for e in engines.all if e.name == "vllm")
     summary = runner.store.read_json("summary.json")["both_tools"]

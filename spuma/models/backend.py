@@ -12,8 +12,8 @@ from typing import Any, Literal, Protocol, runtime_checkable
 
 from langchain_core.messages import BaseMessage
 
+from spuma.config import get_settings
 from spuma.models.config import BackendKind, GenerationConfig, ModelConfig
-from spuma.uncertainty.config import UncertaintyConfig
 
 logger = logging.getLogger(__name__)
 
@@ -178,8 +178,10 @@ def scorer_id(config: ModelConfig, kind: BackendKind) -> str:
     return f"{kind}:{config.fingerprint(kind)}"
 
 
-def generation_logprob_mode(config: ModelConfig, uq: UncertaintyConfig) -> LogprobMode:
-    """What to score while generating: only when the generation backend is also the scoring backend."""
+def generation_logprob_mode(config: ModelConfig) -> LogprobMode:
+    """What to score while generating `config`'s model: only when its generation backend is also its scoring
+    backend, and only what the enabled `uncertainty:` metrics need."""
+    uq = get_settings().uncertainty
     if not config.scores_at_generation:
         return "none"
     if uq.predictive_entropy.enabled:

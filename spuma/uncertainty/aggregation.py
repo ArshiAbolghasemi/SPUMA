@@ -4,7 +4,7 @@ import math
 from collections.abc import Callable, Sequence
 
 from spuma.agents.trajectory import AgentTrace
-from spuma.uncertainty.config import AggregationConfig
+from spuma.config import get_settings
 
 AggregationStrategy = Callable[[Sequence[float]], float]
 
@@ -32,7 +32,9 @@ def register_aggregator(name: str, fn: AggregationStrategy) -> None:
     AGGREGATORS[name] = fn
 
 
-def aggregate_agent(trace: AgentTrace, config: AggregationConfig, metrics: Sequence[str]) -> dict[str, float]:
+def aggregate_agent(trace: AgentTrace, metrics: Sequence[str]) -> dict[str, float]:
+    """Each metric over the agent's steps, with the strategy named in the `aggregation:` settings."""
+    config = get_settings().aggregation
     out = {}
     for m in metrics:
         name = config.for_metric(m)

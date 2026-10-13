@@ -4,8 +4,8 @@ from collections.abc import Callable
 
 from langchain_core.tools import BaseTool
 
+from spuma.config import get_settings
 from spuma.tools.base import ToolUnavailable
-from spuma.tools.config import ToolConfig
 from spuma.tools.math import math_verify, sympy_differentiate, sympy_integrate, sympy_simplify, sympy_solve
 from spuma.tools.worker import IsolatedRunner
 
@@ -27,7 +27,8 @@ class MathToolProvider:
     def __init__(self, runner: IsolatedRunner, tools: dict[str, ToolBuilder]) -> None:
         self.runner, self.tools = runner, tools
 
-    def build(self, name: str, config: ToolConfig) -> BaseTool:
+    def build(self, name: str) -> BaseTool:
+        config = get_settings().tools.registry[name]
         operation = config.options.get("operation", name)
         if operation not in self.tools:
             raise ToolUnavailable(f"provider {config.provider!r} has no operation {operation!r}")

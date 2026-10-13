@@ -7,14 +7,15 @@ unsupported combination fails in seconds instead of after hours of generation.
 import logging
 from typing import Any
 
-from spuma.config import Settings
+from spuma.config import get_settings
 from spuma.models.backend import BackendCapabilityError, backend_class
 
 logger = logging.getLogger(__name__)
 
 
-def execution_plan(config: Settings) -> dict[str, dict[str, Any]]:
+def execution_plan(variant: str | None = None) -> dict[str, dict[str, Any]]:
     """Per model in use: generation backend, scoring backend, and the capabilities each must have."""
+    config = get_settings(variant)
     uq = config.uncertainty
     tools_on = config.tools.enabled and any(t.enabled for t in config.tools.registry.values())
     plan: dict[str, dict[str, Any]] = {}
@@ -51,9 +52,10 @@ def execution_plan(config: Settings) -> dict[str, dict[str, Any]]:
     return plan
 
 
-def validate_backends(config: Settings) -> dict[str, dict[str, Any]]:
-    """Raise BackendCapabilityError listing every unmet requirement; returns the (JSON-able) plan."""
-    plan = execution_plan(config)
+def validate_backends(variant: str | None = None) -> dict[str, dict[str, Any]]:
+    """Raise BackendCapabilityError listing every unmet requirement of the settings; returns the plan."""
+    config = get_settings(variant)
+    plan = execution_plan(variant)
     problems = []
     for key, entry in plan.items():
         model = config.all_models()[key]

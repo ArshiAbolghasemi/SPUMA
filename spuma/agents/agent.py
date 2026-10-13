@@ -6,10 +6,9 @@ from typing import Any, Protocol
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
-from spuma.agents.config import AgentConfig
 from spuma.agents.trajectory import StepRecord
 from spuma.common.utils import derive_seed
-from spuma.config import Settings
+from spuma.config import get_settings
 from spuma.models.backend import GenerationRequest, ModelBackend, generation_logprob_mode, require
 from spuma.models.chat import RAW_TEXT_KEY, to_chat_dicts
 from spuma.tools.registry import ToolRegistry
@@ -26,7 +25,13 @@ class Agent(Protocol):
 
 
 class LLMAgent:
-    def __init__(self, config: AgentConfig, root: Settings, backend: ModelBackend, registry: ToolRegistry) -> None:
+    """The agent `agent_id` of the `agents:` settings (with `variant`'s allowed_tools), generating with `backend`."""
+
+    def __init__(
+        self, agent_id: str, backend: ModelBackend, registry: ToolRegistry, variant: str | None = None
+    ) -> None:
+        root = get_settings(variant)
+        config = next(a for a in root.agents.items if a.id == agent_id)
         self.config = config
         self.id = config.id
         self.backend = backend
@@ -35,7 +40,7 @@ class LLMAgent:
         self.max_tool_calls = root.max_tool_calls_for(config)
         self.model_name = root.model_for(config).name
         # Raw-model log-probs are captured while generating only if this backend is also the scorer.
-        self.logprobs = generation_logprob_mode(root.model_for(config), root.uncertainty)
+        self.logprobs = generation_logprob_mode(root.model_for(config))
         self.seed = root.project.seed
         # Permissions come from config only. The executor re-checks them on every call.
         self.allowed_tools = list(config.allowed_tools)

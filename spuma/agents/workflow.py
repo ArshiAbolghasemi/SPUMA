@@ -17,7 +17,7 @@ from langgraph.graph import END, START, StateGraph
 
 from spuma.agents.agent import LLMAgent
 from spuma.agents.trajectory import AgentTrace, Trajectory
-from spuma.config import Settings
+from spuma.config import get_settings
 from spuma.models.backend import ModelBackend
 from spuma.tools.registry import ToolExecutor, ToolRegistry
 
@@ -32,10 +32,10 @@ class State(TypedDict):
 
 
 def build_agents(
-    config: Settings, registry: ToolRegistry, backend_for: Callable[[str], ModelBackend]
+    registry: ToolRegistry, backend_for: Callable[[str], ModelBackend], variant: str | None = None
 ) -> list[LLMAgent]:
-    """Enabled agents in config order (the stable order that features use)."""
-    return [LLMAgent(a, config, backend_for(a.id), registry) for a in config.agents.enabled]
+    """Enabled agents in settings order (the stable order that features use)."""
+    return [LLMAgent(a.id, backend_for(a.id), registry, variant) for a in get_settings(variant).agents.enabled]
 
 
 class MultiAgentWorkflow:
@@ -140,8 +140,13 @@ class MultiAgentWorkflow:
 
 
 def build_workflow(
-    config: Settings, registry: ToolRegistry, backend_for: Callable[[str], ModelBackend], executor: ToolExecutor
+    registry: ToolRegistry,
+    backend_for: Callable[[str], ModelBackend],
+    executor: ToolExecutor,
+    variant: str | None = None,
 ) -> MultiAgentWorkflow:
-    if config.agents.workflow != "sequential":
-        raise ValueError(f"unsupported workflow {config.agents.workflow!r}")
-    return MultiAgentWorkflow(build_agents(config, registry, backend_for), executor)
+    """The `agents.workflow` graph; `variant` selects an experiment variant's allowed_tools."""
+    workflow = get_settings(variant).agents.workflow
+    if workflow != "sequential":
+        raise ValueError(f"unsupported workflow {workflow!r}")
+    return MultiAgentWorkflow(build_agents(registry, backend_for, variant), executor)

@@ -70,19 +70,30 @@ def test_fingerprints_separate_engines_and_generation():
     assert scorer_id(base, "transformers").startswith("transformers:")
 
 
-def test_generation_logprob_mode(config):
-    uq = config.uncertainty
-    assert generation_logprob_mode(config.model, uq) == "full"
-    no_pe = uq.model_copy(update={"predictive_entropy": uq.predictive_entropy.model_copy(update={"enabled": False})})
-    assert generation_logprob_mode(config.model, no_pe) == "token"
+def test_generation_logprob_mode(config, set_settings):
+    assert generation_logprob_mode(config.model) == "full"
     hybrid = config.model.model_copy(update={"backend": "vllm", "scoring_backend": "transformers"})
-    assert generation_logprob_mode(hybrid, uq) == "none"
+    assert generation_logprob_mode(hybrid) == "none"
+    uq = config.uncertainty
+    no_pe = uq.model_copy(update={"predictive_entropy": uq.predictive_entropy.model_copy(update={"enabled": False})})
+    set_settings(config.replace(uncertainty=no_pe, features=_features_without(config, "_pe")))
+    assert generation_logprob_mode(config.model) == "token"
 
 
-def _with_model(config, **model):
-    raw = config.to_dict()
-    raw["model"].update(model)
-    return Settings.from_dict(raw)
+def _features_without(config, suffix):
+    return config.features.model_copy(update={"order": [f for f in config.features.order if not f.endswith(suffix)]})
+
+
+@pytest.fixture
+def with_model(config, set_settings):
+    """Install settings whose `model:` section has these fields replaced."""
+
+    def install(**model):
+        raw = config.to_dict()
+        raw["model"].update(model)
+        return set_settings(Settings.from_dict(raw))
+
+    return install
 
 
 @pytest.mark.parametrize(
@@ -93,36 +104,45 @@ def _with_model(config, **model):
         ("vllm", "transformers", set(), {"teacher_forced_scoring", "full_vocabulary_scoring"}),
     ],
 )
-def test_execution_plan_modes(config, backend, scoring, gen_req, score_req):
-    plan = execution_plan(_with_model(config, backend=backend, scoring_backend=scoring))["default"]
+def test_execution_plan_modes(with_model, backend, scoring, gen_req, score_req):
+    with_model(backend=backend, scoring_backend=scoring)
+    plan = execution_plan()["default"]
     assert plan["agents"] == ["solver", "reviewer"]
     assert {"generation", "tool_calling", "multiple_completions"} <= plan["generation_requires"]
     assert gen_req <= plan["generation_requires"] and plan["scoring_requires"] == score_req
     assert not ({"full_vocabulary_logprobs"} <= plan["generation_requires"]) or scoring == "same"
 
 
-def test_validation_passes_for_transformers(config):
-    plan = validate_backends(config)
+def test_execution_plan_per_variant():
+    # no_tools: neither agent may call tools, so tool calling is not required for that variant
+    assert "tool_calling" not in execution_plan("no_tools")["default"]["generation_requires"]
+    assert "tool_calling" in execution_plan("both_tools")["default"]["generation_requires"]
+
+
+def test_validation_passes_for_transformers():
+    plan = validate_backends()
     assert plan["default"]["generation_backend"] == "transformers"
 
 
-def test_validation_fails_early_without_vllm(config, monkeypatch):
+def test_validation_fails_early_without_vllm(with_model, monkeypatch):
     monkeypatch.setattr("importlib.util.find_spec", lambda name: None)
+    with_model(backend="vllm")
     with pytest.raises(BackendCapabilityError, match="vLLM is not installed"):
-        validate_backends(_with_model(config, backend="vllm"))
+        validate_backends()
 
 
-def test_validation_reports_capped_logprobs(config, fake_vllm_module):
-    cfg = _with_model(config, backend="vllm", vllm={"max_logprobs": 20})
+def test_validation_reports_capped_logprobs(with_model, set_settings, fake_vllm_module):
+    capped = with_model(backend="vllm", vllm={"max_logprobs": 20})
     with pytest.raises(BackendCapabilityError, match="full_vocabulary_logprobs"):
-        validate_backends(cfg)
+        validate_backends()
     # NLL-only experiments do not need the full vocabulary
-    raw = cfg.to_dict()
+    raw = capped.to_dict()
     raw["uncertainty"]["predictive_entropy"]["enabled"] = False
     raw["features"]["order"] = [f for f in raw["features"]["order"] if not f.endswith("_pe")]
-    validate_backends(Settings.from_dict(raw))
+    set_settings(Settings.from_dict(raw))
+    validate_backends()
 
 
-def test_hybrid_validates_scoring_backend(config, fake_vllm_module):
-    plan = validate_backends(_with_model(config, backend="vllm", scoring_backend="transformers"))
-    assert plan["default"]["scoring_backend"] == "transformers"
+def test_hybrid_validates_scoring_backend(with_model, fake_vllm_module):
+    with_model(backend="vllm", scoring_backend="transformers")
+    assert validate_backends()["default"]["scoring_backend"] == "transformers"

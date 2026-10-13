@@ -15,6 +15,7 @@ Latency and memory differ across engines by design; outputs of different engines
 
 import argparse
 import logging
+import os
 import time
 from datetime import UTC, datetime
 from typing import Any
@@ -23,8 +24,8 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from spuma.artifacts import FileArtifactStore
 from spuma.common.logs import setup_logging
-from spuma.config import PROJECT_ROOT, Settings, load_settings
-from spuma.dataset import get_dataset
+from spuma.config import CONFIG_FILE_ENV, PROJECT_ROOT, get_settings
+from spuma.dataset.registry import get_dataset
 from spuma.models.backend import GenerationRequest, ModelBackend, get_backend, release_backends
 
 logger = logging.getLogger("spuma.models.benchmark")
@@ -38,7 +39,8 @@ def _gpu() -> dict[str, float]:
     return {"gpu_peak_gib": round(torch.cuda.max_memory_allocated() / 1024**3, 3)}
 
 
-def benchmark_backend(backend: ModelBackend, config: Settings, prompts: list[list[int]]) -> dict[str, Any]:
+def benchmark_backend(backend: ModelBackend, prompts: list[list[int]]) -> dict[str, Any]:
+    config = get_settings()
     gen_cfg = config.model.generation
     se = config.uncertainty.semantic_entropy
     seed = config.project.seed
@@ -87,9 +89,11 @@ def main() -> None:
     parser.add_argument("--config", help="path to the config file (default: config/config-qwen-math.yaml)")
     args = parser.parse_args()
 
-    config = load_settings(args.config)
-    setup_logging(config.logging, "benchmark")
-    problems = get_dataset(config.dataset).load()["test"][: args.problems]
+    if args.config:
+        os.environ[CONFIG_FILE_ENV] = args.config  # read by the first get_settings() call
+    config = get_settings()
+    setup_logging("benchmark")
+    problems = get_dataset().load()["test"][: args.problems]
     agent = config.agents.enabled[0]
     results = []
     for kind in args.backend:
@@ -104,7 +108,7 @@ def main() -> None:
             )
             for p in problems
         ]
-        result = benchmark_backend(backend, config, prompts)
+        result = benchmark_backend(backend, prompts)
         logger.info("benchmark", extra=result)
         results.append(result)
         release_backends()  # the next engine gets the whole GPU

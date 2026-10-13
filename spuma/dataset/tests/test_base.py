@@ -1,21 +1,30 @@
 import pytest
 
-from spuma.dataset import Problem, get_dataset, get_grader, make_splits, normalize
-from spuma.dataset.base import load_hf_rows
-from spuma.dataset.config import DatasetConfig
+from spuma.dataset.base import Problem, load_hf_rows, make_splits, normalize
 from spuma.dataset.math import MathDataset, MathVerifyGrader
+from spuma.dataset.registry import get_dataset, get_grader
 
 
 def _pool(split, n):
     return [Problem(f"{split}/{i}", f"q{i}", f"s{i}", split) for i in range(n)]
 
 
-def _cfg(**kw):
-    return DatasetConfig(**({"train_samples": 5, "validation_samples": 3, "test_samples": 4} | kw))
+@pytest.fixture
+def sizes(config, set_settings):
+    """Install `dataset:` settings with small split sizes (plus any overrides) for this test."""
+
+    def install(**kw):
+        dataset = config.dataset.model_copy(
+            update={"train_samples": 5, "validation_samples": 3, "test_samples": 4} | kw
+        )
+        set_settings(config.replace(dataset=dataset))
+
+    install()
+    return install
 
 
-def test_splits_disjoint_and_respect_official_boundaries():
-    splits = make_splits(_pool("train", 10), _pool("test", 6), _cfg())
+def test_splits_disjoint_and_respect_official_boundaries(sizes):
+    splits = make_splits(_pool("train", 10), _pool("test", 6))
     assert {k: len(v) for k, v in splits.items()} == {"train": 5, "validation": 3, "test": 4}
     train_ids = {p.problem_id for p in splits["train"]}
     val_ids = {p.problem_id for p in splits["validation"]}
@@ -25,17 +34,19 @@ def test_splits_disjoint_and_respect_official_boundaries():
     assert {p.split for p in splits["validation"]} == {"validation"}
 
 
-def test_splits_depend_only_on_seed_and_ids():
+def test_splits_depend_only_on_seed_and_ids(sizes):
     ids = lambda s: [p.problem_id for p in s["train"]]  # noqa: E731
-    a = make_splits(_pool("train", 10), _pool("test", 6), _cfg())
-    b = make_splits(list(reversed(_pool("train", 10))), _pool("test", 6), _cfg())
-    c = make_splits(_pool("train", 10), _pool("test", 6), _cfg(seed=7))
+    a = make_splits(_pool("train", 10), _pool("test", 6))
+    b = make_splits(list(reversed(_pool("train", 10))), _pool("test", 6))
+    sizes(seed=7)
+    c = make_splits(_pool("train", 10), _pool("test", 6))
     assert ids(a) == ids(b) and ids(a) != ids(c)
 
 
-def test_too_many_requested():
+def test_too_many_requested(sizes):
+    sizes(test_samples=99)
     with pytest.raises(ValueError, match="available"):
-        make_splits(_pool("train", 10), _pool("test", 6), _cfg(test_samples=99))
+        make_splits(_pool("train", 10), _pool("test", 6))
 
 
 def test_load_hf_rows():
@@ -48,5 +59,5 @@ def test_normalize():
 
 
 def test_registry():
-    assert isinstance(get_dataset(DatasetConfig()), MathDataset)
-    assert isinstance(get_grader(DatasetConfig()), MathVerifyGrader)
+    assert isinstance(get_dataset(), MathDataset)  # dataset.name: math
+    assert isinstance(get_grader(), MathVerifyGrader)

@@ -1,7 +1,6 @@
 import pytest
 
-from spuma.dataset import Problem
-from spuma.dataset.config import DatasetConfig
+from spuma.dataset.base import Problem
 from spuma.dataset.math import MathDataset, MathVerifyGrader, extract_boxed
 
 
@@ -13,9 +12,10 @@ def _fake_loader(path, subset, split):
     ]
 
 
-def test_loader_ids_metadata_and_splits():
-    cfg = DatasetConfig(subsets=["algebra", "geometry"], train_samples=5, validation_samples=3, test_samples=4)
-    splits = MathDataset(cfg, loader=_fake_loader).load()
+def test_loader_ids_metadata_and_splits(config, set_settings):
+    sizes = {"subsets": ["algebra", "geometry"], "train_samples": 5, "validation_samples": 3, "test_samples": 4}
+    set_settings(config.replace(dataset=config.dataset.model_copy(update=sizes)))
+    splits = MathDataset(loader=_fake_loader).load()
     assert {k: len(v) for k, v in splits.items()} == {"train": 5, "validation": 3, "test": 4}
     p = splits["test"][0]
     assert p.problem_id.startswith("math/test/") and p.metadata["level"] == "Level 1"

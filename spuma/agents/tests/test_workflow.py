@@ -19,13 +19,10 @@ def runner():
     r.close()
 
 
-def _workflow(config, backend, runner, max_steps=None):
-    if max_steps:
-        config = config.replace(
-            orchestration=config.orchestration.model_copy(update={"max_steps_per_agent": max_steps})
-        )
-    registry = build_tool_registry(config.tools, default_providers(runner))
-    return build_workflow(config, registry, lambda _id: backend, ToolExecutor(registry, config.tools.execution))
+def _workflow(backend, runner, variant=None):
+    """The workflow for the current get_settings() (tests install modified settings with `set_settings`)."""
+    registry = build_tool_registry(default_providers(runner))
+    return build_workflow(registry, lambda _id: backend, ToolExecutor(registry), variant)
 
 
 def test_solver_tool_cycle_then_reviewer(config, runner, scripted_backend_cls):
@@ -37,7 +34,7 @@ def test_solver_tool_cycle_then_reviewer(config, runner, scripted_backend_cls):
             "The solution is right. \\boxed{2}",
         ]
     )
-    traj = _workflow(config, backend, runner).run("p1", "Solve 2x + 3 = 7.")
+    traj = _workflow(backend, runner).run("p1", "Solve 2x + 3 = 7.")
     solver, reviewer = traj.agents
     assert [a.agent_id for a in traj.agents] == ["solver", "reviewer"]
     assert len(solver.steps) == 2 and solver.stop_reason == "final_message"
@@ -58,7 +55,7 @@ def test_solver_tool_cycle_then_reviewer(config, runner, scripted_backend_cls):
 
 def test_step_records_reconstruct_model_call(config, runner, scripted_backend_cls):
     backend = scripted_backend_cls(["\\boxed{1}", "\\boxed{1}"])
-    traj = _workflow(config, backend, runner).run("p2", "1?")
+    traj = _workflow(backend, runner).run("p2", "1?")
     step = traj.agents[0].steps[0]
     request = backend.calls[0]
     assert step.prompt_ids == request.prompt_ids
@@ -70,47 +67,48 @@ def test_step_records_reconstruct_model_call(config, runner, scripted_backend_cl
     assert json.loads(traj.model_dump_json())["problem_id"] == "p2"
 
 
-def test_hybrid_generation_requests_no_scores(config, runner, scripted_backend_cls):
-    hybrid = config.replace(
-        model=config.model.model_copy(update={"backend": "vllm", "scoring_backend": "transformers"})
+def test_hybrid_generation_requests_no_scores(config, set_settings, runner, scripted_backend_cls):
+    set_settings(
+        config.replace(model=config.model.model_copy(update={"backend": "vllm", "scoring_backend": "transformers"}))
     )
     backend = scripted_backend_cls(["\\boxed{1}", "\\boxed{1}"], kind="vllm")
-    step = _workflow(hybrid, backend, runner).run("p8", "1?").agents[0].steps[0]
+    step = _workflow(backend, runner).run("p8", "1?").agents[0].steps[0]
     assert backend.calls[0].logprobs == "none" and step.token_logprobs is None and step.scored_by is None
 
 
-def test_max_steps_stops_tool_loop(config, runner, scripted_backend_cls):
+def test_max_steps_stops_tool_loop(config, set_settings, runner, scripted_backend_cls):
+    set_settings(config.replace(orchestration=config.orchestration.model_copy(update={"max_steps_per_agent": 2})))
     backend = scripted_backend_cls([SOLVE_CALL, SOLVE_CALL, "\\boxed{2}"])
-    traj = _workflow(config, backend, runner, max_steps=2).run("p3", "Solve 2x + 3 = 7.")
+    traj = _workflow(backend, runner).run("p3", "Solve 2x + 3 = 7.")
     solver = traj.agents[0]
     assert len(solver.steps) == 2 and solver.stop_reason == "max_steps"
     assert solver.steps[1].tool_records == []  # the last step's calls are not executed
 
 
-def test_tool_budget_enforced(config, runner, scripted_backend_cls):
+def test_tool_budget_enforced(config, set_settings, runner, scripted_backend_cls):
     raw = config.to_dict()
     raw["agents"]["items"][0]["max_tool_calls"] = 1
-    cfg = type(config).from_dict(raw)
+    set_settings(type(config).from_dict(raw))
     backend = scripted_backend_cls([SOLVE_CALL + SOLVE_CALL, "\\boxed{2}", "\\boxed{2}"])
-    traj = _workflow(cfg, backend, runner).run("p4", "q")
+    traj = _workflow(backend, runner).run("p4", "q")
     statuses = [r["status"] for r in traj.agents[0].steps[0].tool_records]
     assert statuses == ["success", "budget_exceeded"]
 
 
 def test_malformed_tool_call_gets_error_observation(config, runner, scripted_backend_cls):
     backend = scripted_backend_cls(["<tool_call>{bad json</tool_call>", "\\boxed{2}", "\\boxed{2}"])
-    traj = _workflow(config, backend, runner).run("p5", "q")
+    traj = _workflow(backend, runner).run("p5", "q")
     assert traj.agents[0].steps[0].tool_records[0]["status"] == "invalid_call"
 
 
 def test_no_tools_variant_offers_nothing(config, runner, scripted_backend_cls):
     backend = scripted_backend_cls([SOLVE_CALL, "\\boxed{2}", "\\boxed{2}"])
-    traj = _workflow(config.with_variant("no_tools"), backend, runner).run("p6", "q")
+    traj = _workflow(backend, runner, variant="no_tools").run("p6", "q")
     assert backend.tools_seen[0] == []
     assert traj.agents[0].steps[0].tool_records[0]["status"] == "permission_denied"
 
 
 def test_graph_never_sees_reference(config, runner, scripted_backend_cls):
     backend = scripted_backend_cls(["\\boxed{5}", "\\boxed{5}"])
-    _workflow(config, backend, runner).run("p7", "What is 2+3?")
+    _workflow(backend, runner).run("p7", "What is 2+3?")
     assert not any("reference" in p.lower() or "ground truth" in p.lower() for p in backend.prompts)

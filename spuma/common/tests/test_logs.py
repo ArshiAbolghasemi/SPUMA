@@ -4,8 +4,9 @@ import logging
 from spuma.common.logs import JsonFormatter, set_run_id, setup_logging
 
 
-def test_json_logging(tmp_path, config):
-    log_file = setup_logging(config.logging.model_copy(update={"directory": tmp_path, "console": False}), "t")
+def test_json_logging(tmp_path, config, set_settings):
+    set_settings(config.replace(logging=config.logging.model_copy(update={"directory": tmp_path, "console": False})))
+    log_file = setup_logging("t")
     set_run_id("run-1")
     logging.getLogger("spuma.test").info("hello", extra={"agent_id": "solver"})
     for h in logging.getLogger().handlers:

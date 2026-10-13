@@ -4,7 +4,6 @@ import subprocess
 
 import pytest
 
-from spuma.tools.config import ToolConfig, ToolExecutionConfig
 from spuma.tools.math.sympy_simplify import simplify
 from spuma.tools.python_sandbox import DockerSandbox, PythonSandboxProvider, SandboxUnavailable
 from spuma.tools.registry import (
@@ -14,8 +13,6 @@ from spuma.tools.registry import (
     default_providers,
 )
 from spuma.tools.worker import IsolatedRunner, ToolTimeout
-
-EXEC = ToolExecutionConfig()
 
 
 def _run(executor, name, args, allowed, used=0, max_calls=5, call_id="c0"):
@@ -56,7 +53,7 @@ def test_effective_tools_is_intersection(registry, config):
 
 def test_successful_call_record(registry):
     record = _run(
-        ToolExecutor(registry, EXEC), "sympy_solve", {"equations": ["x**2 = 9"], "variables": ["x"]}, ["sympy_solve"]
+        ToolExecutor(registry), "sympy_solve", {"equations": ["x**2 = 9"], "variables": ["x"]}, ["sympy_solve"]
     )
     assert record.status == "success" and record.error is None
     assert record.arguments == {"equations": ["x**2 = 9"], "variables": ["x"]}
@@ -76,27 +73,26 @@ def test_successful_call_record(registry):
 
 def test_unauthorized_call_is_rejected_even_when_enabled(registry, mocker):
     spy = mocker.patch.object(registry.tools["math_verify"], "func")
-    record = _run(
-        ToolExecutor(registry, EXEC), "math_verify", {"expression_a": "1", "expression_b": "1"}, ["sympy_solve"]
-    )
+    record = _run(ToolExecutor(registry), "math_verify", {"expression_a": "1", "expression_b": "1"}, ["sympy_solve"])
     assert record.status == "permission_denied" and "not permitted" in record.error
     assert json.loads(record.observation) == {"status": "permission_denied", "error": record.error}
     spy.assert_not_called()
 
 
 def test_disabled_tool_rejected_even_if_allowed(registry):
-    record = _run(ToolExecutor(registry, EXEC), "python_execute", {"code": "print(1)"}, ["python_execute"])
+    record = _run(ToolExecutor(registry), "python_execute", {"code": "print(1)"}, ["python_execute"])
     assert record.status == "disabled"
 
 
-def test_runtime_global_disable(config, runner):
-    reg = build_tool_registry(config.tools.model_copy(update={"enabled": False}), default_providers(runner))
+def test_runtime_global_disable(config, set_settings, runner):
+    set_settings(config.replace(tools=config.tools.model_copy(update={"enabled": False})))
+    reg = build_tool_registry(default_providers(runner))
     assert reg.effective_tools(["sympy_solve"]) == []
-    assert _run(ToolExecutor(reg, EXEC), "sympy_solve", {"equations": ["x"]}, ["sympy_solve"]).status == "disabled"
+    assert _run(ToolExecutor(reg), "sympy_solve", {"equations": ["x"]}, ["sympy_solve"]).status == "disabled"
 
 
 def test_unknown_tool_budget_and_invalid(registry):
-    ex = ToolExecutor(registry, EXEC)
+    ex = ToolExecutor(registry)
     assert _run(ex, "rm_rf", {}, ["rm_rf"]).status == "unknown_tool"
     assert _run(ex, "sympy_solve", {"equations": ["x"]}, ["sympy_solve"], used=5).status == "budget_exceeded"
     assert _run(ex, "sympy_solve", {"equations": []}, ["sympy_solve"]).status == "invalid_arguments"
@@ -113,19 +109,24 @@ def test_unknown_tool_budget_and_invalid(registry):
 
 
 def test_tool_error_is_structured(registry):
-    record = _run(
-        ToolExecutor(registry, EXEC), "sympy_simplify", {"expression": "__import__('os')"}, ["sympy_simplify"]
-    )
+    record = _run(ToolExecutor(registry), "sympy_simplify", {"expression": "__import__('os')"}, ["sympy_simplify"])
     assert record.status == "tool_error" and record.result["error_type"] == "invalid_expression"
 
 
-def test_output_truncated_by_tokens(registry):
-    ex = ToolExecutor(registry, EXEC.model_copy(update={"max_output_tokens": 10}), truncate=lambda t, n: t[:n])
+def _execution(config, set_settings, **update):
+    execution = config.tools.execution.model_copy(update=update)
+    set_settings(config.replace(tools=config.tools.model_copy(update={"execution": execution})))
+
+
+def test_output_truncated_by_tokens(registry, config, set_settings):
+    _execution(config, set_settings, max_output_tokens=10)
+    ex = ToolExecutor(registry, truncate=lambda t, n: t[:n])
     assert len(_run(ex, "sympy_simplify", {"expression": "x+1"}, ["sympy_simplify"]).observation) == 10
 
 
-def test_save_results_off(registry):
-    ex = ToolExecutor(registry, EXEC.model_copy(update={"save_results": False}))
+def test_save_results_off(registry, config, set_settings):
+    _execution(config, set_settings, save_results=False)
+    ex = ToolExecutor(registry)
     record = _run(ex, "sympy_simplify", {"expression": "x+x"}, ["sympy_simplify"])
     assert record.result is None and "2*x" in record.observation
 
@@ -149,7 +150,7 @@ def test_worker_timeout_restarts():
 
 def test_timeout_status_from_executor(registry, mocker):
     mocker.patch.object(registry.tools["sympy_solve"], "func", side_effect=ToolTimeout("slow"))
-    assert _run(ToolExecutor(registry, EXEC), "sympy_solve", {"equations": ["x"]}, ["sympy_solve"]).status == "timeout"
+    assert _run(ToolExecutor(registry), "sympy_solve", {"equations": ["x"]}, ["sympy_solve"]).status == "timeout"
 
 
 def test_sandbox_requires_no_network():
@@ -181,7 +182,7 @@ def test_sandbox_env_has_no_secrets(monkeypatch):
 def test_sandbox_unavailable_disables_tool(mocker):
     mocker.patch("spuma.tools.python_sandbox.shutil.which", return_value=None)
     with pytest.raises(ToolUnavailable, match="docker executable"):
-        PythonSandboxProvider().build("python_execute", ToolConfig(provider="python_sandbox"))
+        PythonSandboxProvider().build("python_execute")  # its tools.registry entry from the settings
 
 
 def test_sandbox_timeout(mocker):

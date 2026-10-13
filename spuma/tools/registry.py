@@ -22,8 +22,8 @@ from langchain_core.tools import BaseTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import ValidationError
 
+from spuma.config import get_settings
 from spuma.tools.base import ToolProvider, ToolUnavailable
-from spuma.tools.config import ToolExecutionConfig, ToolsConfig
 from spuma.tools.math.provider import SYMPY_TOOLS, VERIFY_TOOLS, MathToolProvider
 from spuma.tools.python_sandbox import PythonSandboxProvider
 from spuma.tools.worker import IsolatedRunner, ToolTimeout
@@ -65,7 +65,9 @@ class ToolRegistry:
         return [convert_to_openai_tool(self.tools[n]) for n in names]
 
 
-def build_tool_registry(config: ToolsConfig, providers: dict[str, ToolProvider]) -> ToolRegistry:
+def build_tool_registry(providers: dict[str, ToolProvider]) -> ToolRegistry:
+    """Every `tools.registry` entry built by its provider (or recorded as disabled, with the reason)."""
+    config = get_settings().tools
     registry = ToolRegistry(globally_enabled=config.enabled)
     for name, tool_cfg in config.registry.items():
         if not tool_cfg.enabled:
@@ -75,7 +77,7 @@ def build_tool_registry(config: ToolsConfig, providers: dict[str, ToolProvider])
         if provider is None:
             raise ValueError(f"tools.registry.{name}: unknown provider {tool_cfg.provider!r}")
         try:
-            registry.tools[name] = provider.build(name, tool_cfg)
+            registry.tools[name] = provider.build(name)
         except ToolUnavailable as e:
             registry.disabled[name] = str(e)
             logger.warning("tool disabled: missing capability", extra={"tool": name, "reason": str(e)})
@@ -114,10 +116,10 @@ class ToolExecutor:
     def __init__(
         self,
         registry: ToolRegistry,
-        config: ToolExecutionConfig,
         truncate: Callable[[str, int], str] | None = None,
     ) -> None:
-        self.registry, self.config = registry, config
+        self.registry = registry
+        self.config = get_settings().tools.execution
         self.truncate = truncate or (lambda text, n: text)
 
     def execute(

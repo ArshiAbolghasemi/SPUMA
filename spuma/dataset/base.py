@@ -9,7 +9,7 @@ from collections.abc import Callable, Iterator, Sequence
 from dataclasses import asdict, dataclass, field, replace
 from typing import Any, Protocol
 
-from spuma.dataset.config import DatasetConfig
+from spuma.config import get_settings
 
 SPLITS = ("train", "validation", "test")
 
@@ -62,10 +62,11 @@ def load_hf_rows(
             yield subset, i, row
 
 
-def make_splits(train_pool: list[Problem], test_pool: list[Problem], config: DatasetConfig) -> dict[str, list[Problem]]:
+def make_splits(train_pool: list[Problem], test_pool: list[Problem]) -> dict[str, list[Problem]]:
     """Seeded splits that keep official boundaries: train and validation are disjoint draws from the official
     train pool, test is drawn from the official test pool. Pools are sorted by id first, so the result depends
-    only on the seed and the problem ids."""
+    only on the seed and the problem ids. Sizes and seed come from the `dataset:` settings."""
+    config = get_settings().dataset
     need, have = (
         (config.train_samples + config.validation_samples, config.test_samples),
         (len(train_pool), len(test_pool)),

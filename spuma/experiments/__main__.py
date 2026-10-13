@@ -11,9 +11,10 @@
 
 import argparse
 import logging
+import os
 
 from spuma.common.logs import set_run_id, setup_logging
-from spuma.config import load_settings
+from spuma.config import CONFIG_FILE_ENV, get_settings
 from spuma.experiments.runner import PHASES, ExperimentRunner
 
 logger = logging.getLogger("spuma.experiments")
@@ -30,14 +31,16 @@ def main() -> None:
     parser.add_argument("--list", action="store_true", help="list variants and their per-agent allowed tools")
     args = parser.parse_args()
 
-    config = load_settings(args.config)
-    setup_logging(config.logging, config.experiment.name)
+    if args.config:
+        os.environ[CONFIG_FILE_ENV] = args.config  # read by the first get_settings() call
+    settings = get_settings()
+    setup_logging(settings.experiment.name)
     if args.list:
-        for name in config.experiment.variants:
-            v = config.with_variant(name)
-            logger.info("variant %s: %s", name, {a.id: a.allowed_tools for a in v.agents.enabled})
+        for name in settings.experiment.variants:
+            agents = get_settings(name).agents.enabled
+            logger.info("variant %s: %s", name, {a.id: a.allowed_tools for a in agents})
         return
-    runner = ExperimentRunner(config)
+    runner = ExperimentRunner()
     set_run_id(runner.run_id)
     runner.run(variants=args.variant, phases=args.phase, limit=args.limit)
 

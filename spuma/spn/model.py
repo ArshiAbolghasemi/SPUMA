@@ -20,6 +20,7 @@ from spflow.learn.learn_spn import partition_by_rdc
 from spflow.meta.data.scope import Scope
 from spflow.modules.leaves import Laplace, Normal
 
+from spuma.config import get_settings
 from spuma.evaluation.metrics import binary_entropy
 from spuma.spn.config import SPNConfig
 
@@ -51,7 +52,13 @@ def partition_with_constants(data: torch.Tensor, threshold: float) -> torch.Tens
 
 
 class ClassConditionalSPN:
-    def __init__(self, config: SPNConfig, feature_names: list[str]) -> None:
+    """Built from the `spn:` settings over the `features.order` features; `load` restores a checkpoint as saved."""
+
+    def __init__(self) -> None:
+        settings = get_settings()
+        self._init(settings.spn, settings.features.order)
+
+    def _init(self, config: SPNConfig, feature_names: list[str]) -> None:
         self.config = config
         self.feature_names = list(feature_names)
         self.spns: dict[int, Any] = {}
@@ -137,7 +144,8 @@ class ClassConditionalSPN:
     def load(cls, path: Path | io.BytesIO) -> ClassConditionalSPN:
         # Our own checkpoint (pickled SPFlow modules); never load checkpoints from untrusted sources.
         state = torch.load(path, weights_only=False)
-        model = cls(SPNConfig(**state["config"]), state["feature_names"])
+        model = cls.__new__(cls)  # the checkpoint's own config and features, not the current settings
+        model._init(SPNConfig(**state["config"]), state["feature_names"])
         model.spns, model.log_prior = state["spns"], state["log_prior"]
         model.mean, model.std = state["mean"], state["std"]
         return model

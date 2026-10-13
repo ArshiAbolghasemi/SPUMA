@@ -25,6 +25,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG_FILE = PROJECT_ROOT / "config" / "config-qwen-math.yaml"
 DEFAULT_DOTENV_FILE = PROJECT_ROOT / ".env"
 ENV_PREFIX = "SPUMA_"
+CONFIG_FILE_ENV = "SPUMA_CONFIG_FILE"  # path of the config file get_settings() loads (CLI --config sets it)
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +68,14 @@ def apply_env_overrides(raw: dict[str, Any], environ: Mapping[str, str]) -> list
     return applied
 
 
-@lru_cache(maxsize=1)
-def get_settings() -> Settings:
-    """Process-wide settings from the default files, loaded once."""
-    return load_settings()
+@lru_cache(maxsize=32)  # base settings + one entry per experiment variant
+def get_settings(variant: str | None = None) -> Settings:
+    """Process-wide settings, loaded once from the config file (`SPUMA_CONFIG_FILE` or the default) and cached.
+
+    Every package reads its section from here instead of receiving a config argument. `variant` names an
+    `experiment.variants` entry: the same settings with that variant's `allowed_tools` applied (also cached).
+    Call `get_settings.cache_clear()` to reload (tests, or after changing SPUMA_* variables).
+    """
+    if variant is not None:
+        return get_settings().with_variant(variant)
+    return load_settings(os.environ.get(CONFIG_FILE_ENV) or None)

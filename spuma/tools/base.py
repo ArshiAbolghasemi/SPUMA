@@ -4,14 +4,12 @@ from typing import Protocol
 
 from langchain_core.tools import BaseTool
 
-from spuma.tools.config import ToolConfig
-
 
 class ToolUnavailable(RuntimeError):
     """A provider cannot build a tool on this machine (e.g. no sandbox); the tool is disabled."""
 
 
 class ToolProvider(Protocol):
-    def build(self, name: str, config: ToolConfig) -> BaseTool:
-        """Return a LangChain tool (built with `langchain_core.tools.tool`), or raise ToolUnavailable."""
+    def build(self, name: str) -> BaseTool:
+        """The LangChain tool (`langchain_core.tools.tool`) for `tools.registry.<name>`, or raise ToolUnavailable."""
         ...

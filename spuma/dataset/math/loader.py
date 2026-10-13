@@ -6,15 +6,17 @@ Problem ids are stable: `math/<official split>/<subject>/<row>`.
 import logging
 from typing import Any
 
+from spuma.config import get_settings
 from spuma.dataset.base import Problem, load_hf_rows, make_splits
-from spuma.dataset.config import DatasetConfig
 
 logger = logging.getLogger(__name__)
 
 
 class MathDataset:
-    def __init__(self, config: DatasetConfig, loader: Any = None) -> None:
-        self.config = config
+    """Reads the `dataset:` settings; `loader` replaces `datasets.load_dataset` (tests)."""
+
+    def __init__(self, loader: Any = None) -> None:
+        self.config = get_settings().dataset
         if loader is None:
             from datasets import load_dataset
 
@@ -34,6 +36,6 @@ class MathDataset:
         ]
 
     def load(self) -> dict[str, list[Problem]]:
-        splits = make_splits(self._pool("train"), self._pool("test"), self.config)
+        splits = make_splits(self._pool("train"), self._pool("test"))
         logger.info("MATH splits", extra={"sizes": {k: len(v) for k, v in splits.items()}, "seed": self.config.seed})
         return splits

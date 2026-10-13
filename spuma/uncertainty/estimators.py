@@ -20,7 +20,7 @@ from typing import Any, Protocol
 
 from spuma.agents.trajectory import StepRecord, Trajectory
 from spuma.common.utils import derive_seed, stable_hash
-from spuma.config import Settings
+from spuma.config import get_settings
 from spuma.models.backend import BackendCapabilityError, GenerationRequest, ModelBackend, require, scorer_id
 from spuma.models.config import GenerationConfig
 from spuma.uncertainty.config import SemanticEntropyConfig
@@ -64,8 +64,8 @@ class NegativeLogLikelihood:
 
     name = "nll"
 
-    def __init__(self, normalize_by_length: bool = True) -> None:
-        self.normalize = normalize_by_length
+    def __init__(self) -> None:
+        self.normalize = get_settings().uncertainty.nll.normalize_by_length
 
     def estimate(self, step: StepRecord) -> tuple[float, dict[str, Any]]:
         _require_tokens(step)
@@ -88,7 +88,12 @@ class TokenLength:
 # --- semantic entropy --------------------------------------------------------------------------------
 
 
-def semantic_params(config: SemanticEntropyConfig, step: StepRecord) -> GenerationConfig:
+def _se() -> SemanticEntropyConfig:
+    return get_settings().uncertainty.semantic_entropy
+
+
+def semantic_params(step: StepRecord) -> GenerationConfig:
+    config = _se()
     return GenerationConfig(
         temperature=config.temperature,
         top_p=config.top_p,
@@ -97,7 +102,8 @@ def semantic_params(config: SemanticEntropyConfig, step: StepRecord) -> Generati
     )
 
 
-def semantic_policy(config: SemanticEntropyConfig) -> dict[str, Any]:
+def semantic_policy() -> dict[str, Any]:
+    config = _se()
     return {
         "n": config.n,
         "context": "frozen pre-step prompt_ids incl. prior tool observations",
@@ -111,8 +117,8 @@ def semantic_policy(config: SemanticEntropyConfig) -> dict[str, Any]:
     }
 
 
-def _sample_key(config: SemanticEntropyConfig, step: StepRecord) -> str:
-    return stable_hash({"params": semantic_params(config, step).model_dump(), "n": config.n, "prompt": step.prompt_ids})
+def _sample_key(step: StepRecord) -> str:
+    return stable_hash({"params": semantic_params(step).model_dump(), "n": _se().n, "prompt": step.prompt_ids})
 
 
 class SemanticSampler:
@@ -122,13 +128,13 @@ class SemanticSampler:
     only read, so sampling cannot change tool state or the recorded steps.
     """
 
-    def __init__(self, backend: ModelBackend, config: SemanticEntropyConfig, seed: int) -> None:
+    def __init__(self, backend: ModelBackend) -> None:
         require(backend, "multiple_completions", "batch_generation")
-        self.backend, self.config, self.seed = backend, config, seed
+        self.backend, self.config, self.seed = backend, _se(), get_settings().project.seed
 
     def needs_samples(self, step: StepRecord) -> bool:
         stored = step.uq_details.get(SE_SAMPLES_KEY)
-        return not stored or stored.get("key") != _sample_key(self.config, step)
+        return not stored or stored.get("key") != _sample_key(step)
 
     def sample_steps(self, steps: list[StepRecord]) -> None:
         """Fill `uq_details[se_samples]` of the given steps in place."""
@@ -138,7 +144,7 @@ class SemanticSampler:
         requests = [
             GenerationRequest(
                 prompt_ids=s.prompt_ids,
-                params=semantic_params(self.config, s),
+                params=semantic_params(s),
                 seed=derive_seed(self.seed, s.problem_id, s.agent_id, s.step_id, "semantic_entropy"),
                 n=self.config.n,
             )
@@ -148,7 +154,7 @@ class SemanticSampler:
             if len(results) != self.config.n:
                 raise MissingScoresError(f"backend returned {len(results)} samples, expected {self.config.n}")
             step.uq_details[SE_SAMPLES_KEY] = {
-                "key": _sample_key(self.config, step),
+                "key": _sample_key(step),
                 "texts": [r.text for r in results],
                 "num_tokens": [r.num_tokens for r in results],
                 "finish_reasons": [r.finish_reason for r in results],
@@ -156,7 +162,7 @@ class SemanticSampler:
                 "params": request.params.model_dump(),
                 "backend": self.backend.name,
                 "latency_s": sum(r.latency_s for r in results),
-                "policy": semantic_policy(self.config),
+                "policy": semantic_policy(),
             }
         logger.info(
             "semantic samples",
@@ -164,10 +170,11 @@ class SemanticSampler:
         )
 
 
-def load_black_box_uq(config: SemanticEntropyConfig) -> Any:
+def load_black_box_uq() -> Any:
     """UQLM `BlackBoxUQ` with the `semantic_negentropy` scorer (loads the NLI model)."""
     from uqlm import BlackBoxUQ
 
+    config = _se()
     return BlackBoxUQ(
         llm=None,  # responses come from SPUMA's backends; UQLM only scores them
         scorers=["semantic_negentropy"],
@@ -192,14 +199,14 @@ class SemanticEntropy:
 
     name = "se"
 
-    def __init__(self, config: SemanticEntropyConfig, uq: Any = None) -> None:
-        self.config = config
+    def __init__(self, uq: Any = None) -> None:
+        self.config = _se()
         self._uq = uq
 
     @property
     def uq(self) -> Any:
         if self._uq is None:
-            self._uq = load_black_box_uq(self.config)
+            self._uq = load_black_box_uq()
             logger.info(
                 "uqlm BlackBoxUQ ready", extra={"scorer": "semantic_negentropy", "nli": self.config.nli_model_name}
             )
@@ -213,7 +220,7 @@ class SemanticEntropy:
         samples = []
         for step in steps:
             stored = step.uq_details.get(SE_SAMPLES_KEY)
-            if not stored or stored.get("key") != _sample_key(self.config, step):
+            if not stored or stored.get("key") != _sample_key(step):
                 raise MissingScoresError(
                     f"{step.problem_id}/{step.agent_id}/{step.step_id}: no semantic samples for the current "
                     "semantic_entropy settings (they are drawn in the generate phase)"
@@ -285,10 +292,11 @@ class TokenScorer:
         )
 
 
-def build_estimators(config: Settings) -> dict[str, list[UncertaintyEstimator]]:
+def build_estimators() -> dict[str, list[UncertaintyEstimator]]:
     """Per-agent estimator lists in metric order (no backend needed: inputs are stored on the steps)."""
+    config = get_settings()
     uq = config.uncertainty
-    semantic = SemanticEntropy(uq.semantic_entropy)  # one NLI model shared by every agent
+    semantic = SemanticEntropy()  # one NLI model shared by every agent
     out: dict[str, list[UncertaintyEstimator]] = {}
     for agent in config.agents.enabled:
         ests: list[UncertaintyEstimator] = []
@@ -297,17 +305,16 @@ def build_estimators(config: Settings) -> dict[str, list[UncertaintyEstimator]]:
         if uq.semantic_entropy.enabled:
             ests.append(semantic)
         if uq.nll.enabled:
-            ests.append(NegativeLogLikelihood(uq.nll.normalize_by_length))
+            ests.append(NegativeLogLikelihood())
         if uq.token_length.enabled:
             ests.append(TokenLength())
         out[agent.id] = ests
     return out
 
 
-def build_token_scorers(
-    config: Settings, backend_factory: Callable[..., ModelBackend]
-) -> dict[str, TokenScorer | None]:
+def build_token_scorers(backend_factory: Callable[..., ModelBackend]) -> dict[str, TokenScorer | None]:
     """Per-agent scorer (None when neither PE nor NLL is enabled); agents sharing a model share one."""
+    config = get_settings()
     uq = config.uncertainty
     if not (uq.predictive_entropy.enabled or uq.nll.enabled):
         return {a.id: None for a in config.agents.enabled}

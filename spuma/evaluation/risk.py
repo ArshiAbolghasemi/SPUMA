@@ -8,14 +8,11 @@ SPN is registered today; a new model needs a class implementing `RiskModel` and 
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, Self
+from typing import Any, Protocol, Self
 
 import numpy as np
 
 from spuma.spn.model import ClassConditionalSPN
-
-if TYPE_CHECKING:
-    from spuma.config import Settings
 
 
 class RiskModel(Protocol):
@@ -34,14 +31,14 @@ class RiskModel(Protocol):
 
 @dataclass(frozen=True)
 class RiskModelSpec:
-    build: Callable[[Settings], RiskModel]
+    build: Callable[[], RiskModel]  # an untrained model configured from the settings
     load: Callable[[Path], RiskModel]
     suffix: str = ".pt"
 
 
 RISK_MODELS: dict[str, RiskModelSpec] = {
     "spn": RiskModelSpec(
-        build=lambda s: ClassConditionalSPN(s.spn, s.features.order),
+        build=ClassConditionalSPN,
         load=ClassConditionalSPN.load,
     ),
 }
