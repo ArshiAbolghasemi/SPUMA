@@ -72,11 +72,6 @@ class Settings:
             if a.model != "default" and a.model not in self.models:
                 raise ValueError(f"agent {a.id!r}: model {a.model!r} is not 'default' or a key of `models`")
             self._check_tools(a.id, a.allowed_tools)
-        for name, variant in self.experiment.variants.items():
-            for agent_id, tools in variant.allowed_tools.items():
-                if agent_id not in ids:
-                    raise ValueError(f"experiment.variants.{name}: unknown agent {agent_id!r}")
-                self._check_tools(f"{name}/{agent_id}", tools)
         expected = {f"{a.id}_{m}" for a in agents for m in self.uncertainty.enabled_metrics()}
         order = self.features.order
         if len(order) != len(set(order)) or set(order) != expected:
@@ -120,12 +115,6 @@ class Settings:
 
     def max_tool_calls_for(self, agent: AgentConfig) -> int:
         return agent.max_tool_calls if agent.max_tool_calls is not None else self.orchestration.max_tool_calls_per_agent
-
-    def with_variant(self, name: str) -> Settings:
-        """These settings with one experiment variant's `allowed_tools` overrides applied."""
-        overrides = self.experiment.variants[name].allowed_tools
-        items = [dataclasses.replace(a, allowed_tools=overrides.get(a.id, a.allowed_tools)) for a in self.agents.items]
-        return dataclasses.replace(self, agents=dataclasses.replace(self.agents, items=items))
 
     # --- cache keys ------------------------------------------------------------------------------
 
@@ -182,13 +171,10 @@ def load_settings(
     return settings
 
 
-@lru_cache(maxsize=32)  # base settings + one entry per experiment variant
-def get_settings(variant: str | None = None) -> Settings:
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
     """Process-wide settings from the default files, loaded once. Every package reads its section from here
-    instead of receiving a config argument. `variant` names an `experiment.variants` entry: the same settings
-    with that variant's `allowed_tools` applied (also cached). `get_settings.cache_clear()` reloads."""
-    if variant is not None:
-        return get_settings().with_variant(variant)
+    instead of receiving a config argument; `get_settings.cache_clear()` reloads."""
     return load_settings()
 
 

@@ -121,10 +121,11 @@ def test_execution_plan_modes(with_model, backend, scoring, gen_req, score_req):
     assert not ({"full_vocabulary_logprobs"} <= plan["generation_requires"]) or scoring == "same"
 
 
-def test_execution_plan_per_variant():
-    # no_tools: neither agent may call tools, so tool calling is not required for that variant
-    assert "tool_calling" not in execution_plan("no_tools")["default"]["generation_requires"]
-    assert "tool_calling" in execution_plan("both_tools")["default"]["generation_requires"]
+def test_execution_plan_requires_tool_calling_only_with_tools(config, set_settings):
+    assert "tool_calling" in execution_plan()["default"]["generation_requires"]
+    items = [dataclasses.replace(a, allowed_tools=[]) for a in config.agents.items]
+    set_settings(dataclasses.replace(config, agents=dataclasses.replace(config.agents, items=items)))
+    assert "tool_calling" not in execution_plan()["default"]["generation_requires"]
 
 
 def test_validation_passes_for_transformers():

@@ -26,12 +26,10 @@ class Agent(Protocol):
 
 
 class LLMAgent:
-    """The agent `agent_id` of the `agents:` settings (with `variant`'s allowed_tools), generating with `backend`."""
+    """The agent `agent_id` of the `agents:` settings, generating with `backend`."""
 
-    def __init__(
-        self, agent_id: str, backend: ModelBackend, registry: ToolRegistry, variant: str | None = None
-    ) -> None:
-        root = get_settings(variant)
+    def __init__(self, agent_id: str, backend: ModelBackend, registry: ToolRegistry) -> None:
+        root = get_settings()
         config = next(a for a in root.agents.items if a.id == agent_id)
         self.config = config
         self.id = config.id

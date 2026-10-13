@@ -31,11 +31,9 @@ class State(TypedDict):
     messages: dict[str, list[BaseMessage]]
 
 
-def build_agents(
-    registry: ToolRegistry, backend_for: Callable[[str], ModelBackend], variant: str | None = None
-) -> list[LLMAgent]:
+def build_agents(registry: ToolRegistry, backend_for: Callable[[str], ModelBackend]) -> list[LLMAgent]:
     """Enabled agents in settings order (the stable order that features use)."""
-    return [LLMAgent(a.id, backend_for(a.id), registry, variant) for a in get_settings(variant).agents.enabled]
+    return [LLMAgent(a.id, backend_for(a.id), registry) for a in get_settings().agents.enabled]
 
 
 class MultiAgentWorkflow:
@@ -143,10 +141,9 @@ def build_workflow(
     registry: ToolRegistry,
     backend_for: Callable[[str], ModelBackend],
     executor: ToolExecutor,
-    variant: str | None = None,
 ) -> MultiAgentWorkflow:
-    """The `agents.workflow` graph; `variant` selects an experiment variant's allowed_tools."""
-    workflow = get_settings(variant).agents.workflow
+    """The `agents.workflow` graph, with each agent's own `allowed_tools`."""
+    workflow = get_settings().agents.workflow
     if workflow != "sequential":
         raise ValueError(f"unsupported workflow {workflow!r}")
-    return MultiAgentWorkflow(build_agents(registry, backend_for, variant), executor)
+    return MultiAgentWorkflow(build_agents(registry, backend_for), executor)

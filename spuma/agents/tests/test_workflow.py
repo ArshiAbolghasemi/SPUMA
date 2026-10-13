@@ -20,10 +20,10 @@ def runner():
     r.close()
 
 
-def _workflow(backend, runner, variant=None):
+def _workflow(backend, runner):
     """The workflow for the current get_settings() (tests install modified settings with `set_settings`)."""
     registry = build_tool_registry(default_providers(runner))
-    return build_workflow(registry, lambda _id: backend, ToolExecutor(registry), variant)
+    return build_workflow(registry, lambda _id: backend, ToolExecutor(registry))
 
 
 def test_solver_tool_cycle_then_reviewer(config, runner, scripted_backend_cls):
@@ -107,9 +107,11 @@ def test_malformed_tool_call_gets_error_observation(config, runner, scripted_bac
     assert traj.agents[0].steps[0].tool_records[0]["status"] == "invalid_call"
 
 
-def test_no_tools_variant_offers_nothing(config, runner, scripted_backend_cls):
+def test_agent_without_allowed_tools_is_offered_none(config, set_settings, runner, scripted_backend_cls):
+    items = [dataclasses.replace(a, allowed_tools=[]) for a in config.agents.items]
+    set_settings(dataclasses.replace(config, agents=dataclasses.replace(config.agents, items=items)))
     backend = scripted_backend_cls([SOLVE_CALL, "\\boxed{2}", "\\boxed{2}"])
-    traj = _workflow(backend, runner, variant="no_tools").run("p6", "q")
+    traj = _workflow(backend, runner).run("p6", "q")
     assert backend.tools_seen[0] == []
     assert traj.agents[0].steps[0].tool_records[0]["status"] == "permission_denied"
 

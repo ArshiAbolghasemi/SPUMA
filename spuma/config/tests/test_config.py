@@ -69,7 +69,7 @@ def test_dynaconf_nested_env_override_is_typed(monkeypatch):
 
 def test_get_settings_is_cached_until_cleared(monkeypatch):
     first = get_settings()
-    assert get_settings() is first and get_settings("no_tools") is get_settings("no_tools")
+    assert get_settings() is first
     monkeypatch.setenv("SPUMA_DATASET__TEST_SAMPLES", "3")
     assert get_settings().dataset.test_samples == first.dataset.test_samples  # cached
     get_settings.cache_clear()
@@ -141,14 +141,6 @@ def test_unknown_model_reference(raw_config):
     raw_config["models"] = {"other": {"name": "Qwen/Qwen3-0.6B"}}
     config = Settings.from_dict(raw_config)
     assert config.model_for(config.agents.items[1]).name == "Qwen/Qwen3-0.6B"
-
-
-def test_variants_override_allowed_tools(config):
-    no_tools = config.with_variant("no_tools")
-    assert all(a.allowed_tools == [] for a in no_tools.agents.items)
-    solver_only = config.with_variant("solver_tools")
-    assert solver_only.agents.items[0].allowed_tools == config.agents.items[0].allowed_tools
-    assert solver_only.agents.items[1].allowed_tools == []
 
 
 def test_sanitized_redacts_secrets(config):

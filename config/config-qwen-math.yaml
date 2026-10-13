@@ -11,15 +11,6 @@ experiment:
   name: ma_qwen_math
   output_dir: artifacts
   resume: true
-  # Tool-use conditions. Each variant overrides allowed_tools for the listed agents only;
-  # splits and every other setting stay identical across variants.
-  variants:
-    no_tools:
-      allowed_tools: {solver: [], reviewer: []}
-    solver_tools:
-      allowed_tools: {reviewer: []}
-    both_tools: {}
-  spn_protocol: within_variant  # or cross_variant (also scores each SPN on the other variants' test sets)
 
 model:
   name: Qwen/Qwen3-8B

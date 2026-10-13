@@ -138,7 +138,6 @@ def _config(config, tmp_path, backend="transformers", scoring="same"):
     raw["experiment"]["output_dir"] = str(tmp_path)
     raw["evaluation"]["bootstrap"]["iterations"] = 50
     raw["spn"]["min_instances_slice"] = 20
-    raw["experiment"]["spn_protocol"] = "cross_variant"
     raw["model"]["backend"], raw["model"]["scoring_backend"] = backend, scoring
     return type(config).from_dict(raw)
 
@@ -180,16 +179,13 @@ def test_full_pipeline(config, set_settings, tmp_path, runner_proc, fake_capabil
     model = engines.all[0]
     assert model.score_calls == 0  # scored at generation time (scoring_backend: same)
 
-    # one shared split file, three variants evaluated side by side
     summary = store.read_json("summary.json")
-    assert set(summary) == {"no_tools", "solver_tools", "both_tools"}
-    for v, s in summary.items():
-        assert s["n"] == 30 and 0 < s["accuracy"] < 1
-        assert s["models"]["spn"]["auroc"] > 0.9, v
-        assert s["models"]["spn"]["auarc"] > s["accuracy"]
-        assert set(s["models"]) == {"spn", "spn_posterior_entropy"}  # only the configured risk model
+    assert summary["n"] == 30 and 0 < summary["accuracy"] < 1
+    assert summary["models"]["spn"]["auroc"] > 0.9
+    assert summary["models"]["spn"]["auarc"] > summary["accuracy"]
+    assert set(summary["models"]) == {"spn", "spn_posterior_entropy"}  # only the configured risk model
 
-    d = runner.scored_dir("solver_tools")
+    d = runner.scored_dir()
     feats = store.read_json(f"{d}/features.json")
     assert len(feats) == 100 and list(feats[0]["features"]) == cfg.features.order
     assert feats[0]["tool_metadata"]["solver"]["tool_calls"] == 1
@@ -208,13 +204,9 @@ def test_full_pipeline(config, set_settings, tmp_path, runner_proc, fake_capabil
     assert solver["steps"][1]["metrics"]["length"] == len(solver["steps"][1]["token_ids"])
     assert rec["grade"]["label"] in (0, 1)
 
-    no_tools = store.read_json(f"{runner.scored_dir('no_tools')}/features.json")
-    assert all(r["tool_metadata"]["solver"]["tool_calls"] == 0 for r in no_tools)
-
     ev = store.read_json(f"{d}/evaluation.json")
     preds = ev["splits"]["test"]["predictions"]["spn"]
     assert all(0 <= p["p_incorrect"] <= 1 and 0 <= p["posterior_entropy"] <= math.log(2) + 1e-9 for p in preds)
-    assert set(ev["cross_variant_test"]["spn"]) == {"no_tools", "both_tools"}
     assert "ci_low" in ev["splits"]["test"]["models"]["spn"]["auroc"]
     status = store.read_json(f"{d}/models/spn_status.json")
     assert status["status"] == "trained" and status["train_rows"] == 60
@@ -226,7 +218,7 @@ def test_full_pipeline(config, set_settings, tmp_path, runner_proc, fake_capabil
     )
     assert store.read_json("config.json")["model"]["name"] == "Qwen/Qwen3-8B"
 
-    assert meta["backends"]["plan"]["both_tools"]["default"]["generation_backend"] == "transformers"
+    assert meta["backends"]["plan"]["default"]["generation_backend"] == "transformers"
 
     # resume: nothing is regenerated or rescored
     calls = model.calls
@@ -240,15 +232,13 @@ def test_backend_modes(config, set_settings, tmp_path, runner_proc, fake_capabil
     set_settings(_config(config, tmp_path, backend, scoring))
     engines = Engines()
     runner = ExperimentRunner(FakeDataset(), engines.factory, default_providers(runner_proc), release=engines.release)
-    runner.run(variants=["both_tools"])
+    runner.run()
     gen = next(e for e in engines.all if e.name == "vllm")
-    summary = runner.store.read_json("summary.json")["both_tools"]
+    summary = runner.store.read_json("summary.json")
     assert summary["models"]["spn"]["auroc"] > 0.9 and 0 < summary["accuracy"] < 1
-    feats = runner.store.read_json(f"{runner.scored_dir('both_tools')}/features.json")
+    feats = runner.store.read_json(f"{runner.scored_dir()}/features.json")
     assert len(feats) == 100 and all(len(r["features"]) == 8 for r in feats)
-    rec = runner.store.read_json(
-        f"{runner.scored_dir('both_tools')}/steps/{feats[0]['problem_id'].replace('/', '__')}.json"
-    )
+    rec = runner.store.read_json(f"{runner.scored_dir()}/steps/{feats[0]['problem_id'].replace('/', '__')}.json")
     step = rec["trajectory"]["agents"][0]["steps"][0]
     if scoring == "same":
         assert [e[:2] for e in engines.events] == [("load", "vllm")]
@@ -263,7 +253,7 @@ def test_backend_modes(config, set_settings, tmp_path, runner_proc, fake_capabil
         ]
         assert gen.closed and tf.score_calls > 0 and step["scored_by"] == tf.scorer_id
         raw = runner.store.read_json(
-            f"{runner.variant_dir('both_tools')}/trajectories/{feats[0]['problem_id'].replace('/', '__')}.json"
+            f"{runner.generation_dir()}/trajectories/{feats[0]['problem_id'].replace('/', '__')}.json"
         )
         assert raw["trajectory"]["agents"][0]["steps"][0]["token_logprobs"] is None  # vLLM did not score
     assert (
