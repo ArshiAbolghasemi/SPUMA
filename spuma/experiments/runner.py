@@ -30,6 +30,7 @@ import subprocess
 import sys
 import uuid
 from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict
 from datetime import UTC, datetime
 from importlib import metadata
@@ -50,6 +51,7 @@ from spuma.evaluation.metrics import binary_entropy, evaluate
 from spuma.evaluation.risk import risk_model_spec
 from spuma.features import extract_features, tool_metadata
 from spuma.models.backend import ModelBackend, get_backend, release_backends
+from spuma.models.batching import MicroBatcher
 from spuma.models.config import ModelConfig
 from spuma.models.validation import validate_backends
 from spuma.tools.registry import ToolExecutor, ToolProvider, build_tool_registry, default_providers
@@ -184,10 +186,13 @@ class ExperimentRunner:
             raise RuntimeError("no splits.json: run the generate phase first")
         return {k: [Problem(**p) for p in v] for k, v in self.store.read_json("splits.json").items()}
 
+    def _all_problems(self) -> list[tuple[str, int, Problem]]:
+        """(split, index, problem) over every split, in split order."""
+        return [(split, i, p) for split, problems in self.problems().items() for i, p in enumerate(problems)]
+
     def _each_problem(self, phase: str) -> Iterator[tuple[str, int, Problem]]:
-        """(split, index, problem) over every split, with a progress bar for the phase."""
-        splits = self.problems()
-        items = [(split, i, p) for split, problems in splits.items() for i, p in enumerate(problems)]
+        """`_all_problems()` with a progress bar for the phase."""
+        items = self._all_problems()
         return progress(items, total=len(items), desc=phase)
 
     def _backends(self) -> dict[str, ModelBackend]:
@@ -198,7 +203,17 @@ class ExperimentRunner:
         }
 
     def generate(self) -> None:
+        """Run the workflow (+ semantic-entropy sampling) for every problem not generated yet.
+
+        `experiment.concurrent_problems` workflows run at once in worker threads; with more than one, their
+        model calls share batched engine calls. Grading and saving stay in the main thread (Math-Verify's
+        timeouts use signals, which only work there).
+        """
+        concurrency = get_settings().experiment.concurrent_problems
         backends = self._backends()
+        batchers: dict[int, MicroBatcher] = {}
+        if concurrency > 1:  # one batcher per engine, shared by the agents that use it
+            backends = {a: batchers.setdefault(id(b), MicroBatcher(b)) for a, b in backends.items()}
         se_enabled = get_settings().uncertainty.semantic_entropy.enabled
         samplers = {a: SemanticSampler(b) for a, b in backends.items()} if se_enabled else {}
         registry = build_tool_registry(self.providers)
@@ -206,8 +221,11 @@ class ExperimentRunner:
         executor = ToolExecutor(registry, truncate=first.truncate)
         workflow = build_workflow(registry, backends.__getitem__, executor)
         self.store.write_json(f"{self.generation_dir()}/agents.json", [a.describe() for a in workflow.agents])
-        for split, i, problem in self._each_problem("generate"):
+
+        pending, done = [], 0
+        for split, i, problem in self._all_problems():
             rel = f"{self.generation_dir()}/trajectories/{safe_name(problem.problem_id)}.json"
+            trajectory, grade = None, None
             if get_settings().experiment.resume and self.store.exists(rel):
                 record = self.store.read_json(rel)
                 trajectory = Trajectory.model_validate(record["trajectory"])
@@ -217,25 +235,37 @@ class ExperimentRunner:
                     for s in t.steps
                     if t.agent_id in samplers
                 ):
+                    done += 1
                     continue
-                grade_dict = record["grade"]
-            else:
-                # Only the id and the problem text enter the workflow; the reference stays here.
+                grade = record["grade"]
+            pending.append((split, i, problem, rel, trajectory, grade))
+        logger.info("generate", extra={"pending": len(pending), "already_done": done, "concurrent": concurrency})
+
+        def run_problem(problem: Problem, trajectory: Trajectory | None) -> Trajectory:
+            # Worker thread: model and tool calls only. Only the id and the problem text enter the workflow.
+            if trajectory is None:
                 trajectory = workflow.run(problem.problem_id, problem.problem)
-                grade_dict = self.grader.grade(problem, trajectory.final_answer_text).to_dict()
             for trace in trajectory.agents:
                 if trace.agent_id in samplers:
                     samplers[trace.agent_id].sample_steps(trace.steps)
-            self.store.write_json(rel, {"split": split, "trajectory": trajectory.model_dump(), "grade": grade_dict})
-            logger.info(
-                "generated",
-                extra={
-                    "split": split,
-                    "index": i,
-                    "problem_id": problem.problem_id,
-                    "label": grade_dict["label"],
-                },
-            )
+            return trajectory
+
+        pool = ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="spuma-problem")
+        try:
+            futures = {pool.submit(run_problem, p, t): (split, i, p, rel, g) for split, i, p, rel, t, g in pending}
+            for future in progress(as_completed(futures), total=len(futures), desc="generate"):
+                split, i, problem, rel, grade = futures[future]
+                trajectory = future.result()
+                grade = grade or self.grader.grade(problem, trajectory.final_answer_text).to_dict()
+                self.store.write_json(rel, {"split": split, "trajectory": trajectory.model_dump(), "grade": grade})
+                logger.info(
+                    "generated",
+                    extra={"split": split, "index": i, "problem_id": problem.problem_id, "label": grade["label"]},
+                )
+        finally:
+            pool.shutdown(wait=True, cancel_futures=True)  # on an error, drop the problems not started yet
+            for batcher in batchers.values():
+                batcher.stop()
 
     def score(self) -> None:
         estimators = build_estimators()

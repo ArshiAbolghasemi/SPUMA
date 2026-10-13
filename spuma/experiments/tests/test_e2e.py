@@ -133,9 +133,10 @@ def runner_proc():
     r.close()
 
 
-def _config(config, tmp_path, backend="transformers", scoring="same"):
+def _config(config, tmp_path, backend="transformers", scoring="same", concurrent=1):
     raw = config.to_dict()
     raw["experiment"]["output_dir"] = str(tmp_path)
+    raw["experiment"]["concurrent_problems"] = concurrent
     raw["evaluation"]["bootstrap"]["iterations"] = 50
     raw["spn"]["min_instances_slice"] = 20
     raw["model"]["backend"], raw["model"]["scoring_backend"] = backend, scoring
@@ -259,3 +260,18 @@ def test_backend_modes(config, set_settings, tmp_path, runner_proc, fake_capabil
     assert (
         len(step["uq_details"]["se_samples"]["texts"]) == 10 and step["uq_details"]["se_samples"]["backend"] == "vllm"
     )
+
+
+def test_concurrent_problems_give_identical_results(config, set_settings, tmp_path, runner_proc, fake_capabilities):
+    """8 problems in flight (batched model calls) produce exactly the features of the one-at-a-time run."""
+    outputs = {}
+    for concurrent in (1, 8):
+        set_settings(_config(config, tmp_path / f"c{concurrent}", concurrent=concurrent))
+        engines = Engines()
+        runner = ExperimentRunner(
+            FakeDataset(), engines.factory, default_providers(runner_proc), release=engines.release
+        )
+        runner.run(phases=["generate", "score"])
+        rows = runner.store.read_json(f"{runner.scored_dir()}/features.json")
+        outputs[concurrent] = {r["problem_id"]: (r["features"], r["label"]) for r in rows}
+    assert len(outputs[1]) == 100 and outputs[1] == outputs[8]

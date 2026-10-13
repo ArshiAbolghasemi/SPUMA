@@ -11,6 +11,7 @@ experiment:
   name: ma_qwen_math
   output_dir: artifacts
   resume: true
+  concurrent_problems: 8
 
 model:
   name: Qwen/Qwen3-8B
