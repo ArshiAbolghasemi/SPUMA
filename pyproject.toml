@@ -123,7 +123,6 @@ markers = [
     "vllm: needs vLLM (Linux + NVIDIA GPU) and downloads a model",
     "nli: downloads the NLI model used for semantic entropy (microsoft/deberta-large-mnli, ~1.6 GB)",
     "gpu: needs a GPU and downloads the configured model (deselect with -m 'not gpu')",
-    "docker: needs a running Docker daemon for the python_execute sandbox",
 ]
 
 [tool.coverage.run]

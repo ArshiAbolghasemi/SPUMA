@@ -2,7 +2,6 @@
 # Install dependencies with the torch extra that matches the local CUDA toolkit (nvcc).
 #   scripts/install-dependencies.sh                 # torch only
 #   scripts/install-dependencies.sh --accelerate    # + accelerate (multi-GPU / offloaded loading)
-#   scripts/install-dependencies.sh --sandbox       # + pull the python_execute Docker image
 #   scripts/install-dependencies.sh --vllm          # vLLM backend (Linux + NVIDIA): installs the `vllm`
 #                                                   # extra, whose pinned torch replaces the cuXXX extra
 #
@@ -13,14 +12,12 @@ cd "$(dirname "$0")/.."
 export UV_PYTHON_PREFERENCE=only-managed
 
 accelerate=0
-sandbox=0
 vllm=0
 for arg in "$@"; do
     case "$arg" in
         --accelerate) accelerate=1 ;;
-        --sandbox) sandbox=1 ;;
         --vllm) vllm=1 ;;
-        -h|--help) sed -n '2,9p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,8p' "$0"; exit 0 ;;
         *) echo "unknown flag: $arg" >&2; exit 2 ;;
     esac
 done
@@ -49,12 +46,5 @@ args=(--extra "$extra")
 
 echo "uv sync ${args[*]}"
 uv sync "${args[@]}"
-
-if (( sandbox )); then
-    command -v docker >/dev/null || { echo "--sandbox needs Docker" >&2; exit 1; }
-    image=$(uv run --no-sync python -c "from spuma.config import get_settings; print(get_settings().tools.registry['python_execute'].image)")
-    echo "docker pull $image"
-    docker pull "$image"
-fi
 
 [[ -f .env ]] || echo "note: cp .env.example .env and set HF_TOKEN"

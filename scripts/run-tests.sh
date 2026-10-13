@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Run the test suite; all flags are forwarded to pytest.
-#   scripts/run-tests.sh                                  # offline suite (no GPU, no model download, no Docker, no vLLM, no NLI model)
+#   scripts/run-tests.sh                                  # offline suite (no GPU, no model download, no vLLM, no NLI model)
 #   scripts/run-tests.sh --cov                            # + coverage report
-#   scripts/run-tests.sh --all                            # include gpu (Qwen3-8B), vllm, nli and docker tests
+#   scripts/run-tests.sh --all                            # include gpu (Qwen3-8B), vllm and nli tests
 #   scripts/run-tests.sh -m vllm                          # only the vLLM / cross-backend tests (Linux + GPU)
 #   scripts/run-tests.sh -m nli                           # only the real DeBERTa-MNLI semantic-entropy test
 #   scripts/run-tests.sh spuma/tools -k allowlist -x
@@ -20,8 +20,8 @@ done
 if (( all )); then
     export SPUMA_TESTS_ALL=1
 else
-    # Default: exclude tests that need a GPU, Docker or a model download (a later -m from the caller wins).
-    args=(-m 'not gpu and not docker and not vllm and not nli' ${args[@]+"${args[@]}"})
+    # Default: exclude tests that need a GPU or a model download (a later -m from the caller wins).
+    args=(-m 'not gpu and not vllm and not nli' ${args[@]+"${args[@]}"})
 fi
 # --no-sync: a plain `uv run` re-syncs without extras and would strip torch.
 # ${args[@]+...}: an empty array is "unbound" under `set -u` in macOS's bash 3.2.

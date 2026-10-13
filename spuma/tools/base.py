@@ -6,7 +6,7 @@ from langchain_core.tools import BaseTool
 
 
 class ToolUnavailable(RuntimeError):
-    """A provider cannot build a tool on this machine (e.g. no sandbox); the tool is disabled."""
+    """A provider cannot build a tool (e.g. a missing dependency); the tool is disabled, with the reason."""
 
 
 class ToolProvider(Protocol):

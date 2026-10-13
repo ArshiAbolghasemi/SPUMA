@@ -7,24 +7,15 @@ from spuma.common.config import check_choice, check_range
 
 @dataclass(frozen=True)
 class ToolConfig:
-    """One `tools.registry` entry. Provider-specific options are explicit, optional fields."""
+    """One `tools.registry` entry."""
 
     provider: str
     enabled: bool = True
     timeout_seconds: float = 10.0
     operation: str | None = None  # math providers: operation to expose under this name (default: the name)
-    # python_sandbox provider
-    image: str = "python:3.12-slim"
-    memory_mb: int = 512
-    cpus: float = 1.0
-    pids_limit: int = 64
-    network_access: bool = False
 
     def __post_init__(self) -> None:
         check_range("tools.registry.*.timeout_seconds", self.timeout_seconds, gt=0)
-        check_range("tools.registry.*.memory_mb", self.memory_mb, gt=0)
-        check_range("tools.registry.*.cpus", self.cpus, gt=0)
-        check_range("tools.registry.*.pids_limit", self.pids_limit, gt=0)
 
 
 @dataclass(frozen=True)

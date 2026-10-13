@@ -49,9 +49,8 @@ def test_solver_tool_cycle_then_reviewer(config, runner, scripted_backend_cls):
     assert "So x = 2." in reviewer.steps[0].input_messages[1]["content"]
     assert reviewer.steps[0].tool_records[0]["status"] == "permission_denied"
     assert traj.final_answer_text == "The solution is right. \\boxed{2}"
-    # tools offered = effective set: reviewer sees math_verify, solver does not; python_execute disabled
+    # tools offered = effective set: reviewer sees math_verify, solver does not
     assert "math_verify" in backend.tools_seen[2] and "math_verify" not in backend.tools_seen[0]
-    assert all("python_execute" not in t for t in backend.tools_seen)
 
 
 def test_step_records_reconstruct_model_call(config, runner, scripted_backend_cls):

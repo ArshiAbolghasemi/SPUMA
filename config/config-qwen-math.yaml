@@ -71,7 +71,6 @@ agents:
         - sympy_simplify
         - sympy_integrate
         - sympy_differentiate
-        - python_execute
 
     - id: reviewer
       model: default
@@ -85,7 +84,6 @@ agents:
         - sympy_solve
         - sympy_simplify
         - math_verify
-        - python_execute
 
 orchestration:
   framework: langgraph
@@ -120,16 +118,6 @@ tools:
       enabled: true
       provider: math_verify
       timeout_seconds: 10
-
-    python_execute:
-      enabled: false
-      provider: python_sandbox
-      timeout_seconds: 10
-      network_access: false   # must stay false; the sandbox refuses anything else
-      image: python:3.12-slim
-      memory_mb: 512
-      cpus: 1.0
-      pids_limit: 64
 
   execution:
     log_calls: true

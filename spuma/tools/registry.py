@@ -1,7 +1,7 @@
 """Tool registry, provider wiring, and the permission-enforcing executor.
 
 Tools are LangChain tools (`langchain_core.tools.tool`) built by providers: `spuma.tools.math` (SymPy,
-Math-Verify) and `spuma.tools.python_sandbox` (Docker). The registry exposes their OpenAI-style schemas
+Math-Verify). The registry exposes their OpenAI-style schemas
 to agents; the executor validates and invokes them.
 
     effective_tools(agent) = enabled registered tools ∩ agent.allowed_tools
@@ -25,7 +25,6 @@ from pydantic import ValidationError
 from spuma.config import get_settings
 from spuma.tools.base import ToolProvider, ToolUnavailable
 from spuma.tools.math.provider import SYMPY_TOOLS, VERIFY_TOOLS, MathToolProvider
-from spuma.tools.python_sandbox import PythonSandboxProvider
 from spuma.tools.worker import IsolatedRunner, ToolTimeout
 
 logger = logging.getLogger(__name__)
@@ -36,7 +35,6 @@ def default_providers(runner: IsolatedRunner) -> dict[str, ToolProvider]:
     return {
         "sympy": MathToolProvider(runner, SYMPY_TOOLS),
         "math_verify": MathToolProvider(runner, VERIFY_TOOLS),
-        "python_sandbox": PythonSandboxProvider(),
     }
 
 

@@ -1,15 +1,11 @@
 import dataclasses
 import json
-import shutil
-import subprocess
 
 import pytest
 
 from spuma.tools.math.sympy_simplify import simplify
-from spuma.tools.python_sandbox import DockerSandbox, PythonSandboxProvider, SandboxUnavailable
 from spuma.tools.registry import (
     ToolExecutor,
-    ToolUnavailable,
     build_tool_registry,
     default_providers,
 )
@@ -37,7 +33,7 @@ def test_registration_and_discovery(registry):
         "sympy_differentiate",
         "math_verify",
     }
-    assert registry.disabled["python_execute"] == "disabled in config"
+    assert registry.disabled == {}
     (schema,) = registry.schemas(["sympy_solve"])
     assert schema["function"]["name"] == "sympy_solve" and "equations" in schema["function"]["parameters"]["properties"]
 
@@ -46,7 +42,7 @@ def test_effective_tools_is_intersection(registry, config):
     solver, reviewer = config.agents.items
     assert registry.effective_tools(solver.allowed_tools) == sorted(
         ["sympy_solve", "sympy_simplify", "sympy_integrate", "sympy_differentiate"]
-    )  # python_execute is allowed but disabled
+    )
     assert "math_verify" in registry.effective_tools(reviewer.allowed_tools)
     assert "math_verify" not in registry.effective_tools(solver.allowed_tools)
     assert registry.effective_tools([]) == []
@@ -80,8 +76,14 @@ def test_unauthorized_call_is_rejected_even_when_enabled(registry, mocker):
     spy.assert_not_called()
 
 
-def test_disabled_tool_rejected_even_if_allowed(registry):
-    record = _run(ToolExecutor(registry), "python_execute", {"code": "print(1)"}, ["python_execute"])
+def test_disabled_tool_rejected_even_if_allowed(config, set_settings, runner):
+    entries = dict(config.tools.registry)
+    entries["sympy_integrate"] = dataclasses.replace(entries["sympy_integrate"], enabled=False)
+    set_settings(dataclasses.replace(config, tools=dataclasses.replace(config.tools, registry=entries)))
+    reg = build_tool_registry(default_providers(runner))
+    assert reg.disabled == {"sympy_integrate": "disabled in config"}
+    assert "sympy_integrate" not in reg.effective_tools(["sympy_integrate", "sympy_solve"])
+    record = _run(ToolExecutor(reg), "sympy_integrate", {"expression": "x", "variable": "x"}, ["sympy_integrate"])
     assert record.status == "disabled"
 
 
@@ -152,61 +154,3 @@ def test_worker_timeout_restarts():
 def test_timeout_status_from_executor(registry, mocker):
     mocker.patch.object(registry.tools["sympy_solve"], "func", side_effect=ToolTimeout("slow"))
     assert _run(ToolExecutor(registry), "sympy_solve", {"equations": ["x"]}, ["sympy_solve"]).status == "timeout"
-
-
-def test_sandbox_requires_no_network():
-    with pytest.raises(SandboxUnavailable):
-        DockerSandbox(network_access=True)
-
-
-def test_sandbox_command_is_locked_down():
-    cmd = DockerSandbox().command("n")
-    for flag in [
-        "--network",
-        "none",
-        "--read-only",
-        "--cap-drop",
-        "ALL",
-        "no-new-privileges",
-        "--memory",
-        "--pids-limit",
-    ]:
-        assert flag in cmd
-    assert not any(a.startswith(("-v", "--volume", "--mount", "-e", "--env")) for a in cmd)
-
-
-def test_sandbox_env_has_no_secrets(monkeypatch):
-    monkeypatch.setenv("HF_TOKEN", "hf_x")
-    assert "HF_TOKEN" not in DockerSandbox._env()
-
-
-def test_sandbox_unavailable_disables_tool(mocker):
-    mocker.patch("spuma.tools.python_sandbox.shutil.which", return_value=None)
-    with pytest.raises(ToolUnavailable, match="docker executable"):
-        PythonSandboxProvider().build("python_execute")  # its tools.registry entry from the settings
-
-
-def test_sandbox_timeout(mocker):
-    mocker.patch("subprocess.run", side_effect=[subprocess.TimeoutExpired("docker", 1), None])
-    assert DockerSandbox(timeout_seconds=1).execute("while True: pass")["error_type"] == "timeout"
-
-
-def _docker_ready() -> bool:
-    try:
-        DockerSandbox().check_available()
-        return True
-    except SandboxUnavailable, OSError:
-        return False
-
-
-@pytest.mark.docker
-@pytest.mark.skipif(shutil.which("docker") is None, reason="docker not installed")
-def test_sandbox_real_execution():
-    if not _docker_ready():
-        pytest.skip("docker daemon or image unavailable")
-    box = DockerSandbox(timeout_seconds=20)
-    assert box.execute("print(6*7)")["stdout"].strip() == "42"
-    net = box.execute("import urllib.request; urllib.request.urlopen('http://example.com', timeout=3)")
-    assert net["status"] == "error"
-    assert box.execute("open('/etc/x', 'w')")["status"] == "error"
-    assert "HF_TOKEN" not in box.execute("import os; print(dict(os.environ))")["stdout"]

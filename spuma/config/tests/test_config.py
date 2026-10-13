@@ -62,9 +62,9 @@ def test_cache_fingerprints_split_generation_and_scoring(config):
 
 def test_dynaconf_nested_env_override_is_typed(monkeypatch):
     monkeypatch.setenv("SPUMA_MODEL__GENERATION__TEMPERATURE", "0.2")
-    monkeypatch.setenv("SPUMA_TOOLS__REGISTRY__PYTHON_EXECUTE__ENABLED", "true")
+    monkeypatch.setenv("SPUMA_TOOLS__REGISTRY__MATH_VERIFY__ENABLED", "false")
     s = load_settings()
-    assert s.model.generation.temperature == 0.2 and s.tools.registry["python_execute"].enabled is True
+    assert s.model.generation.temperature == 0.2 and s.tools.registry["math_verify"].enabled is False
 
 
 def test_get_settings_is_cached_until_cleared(monkeypatch):
