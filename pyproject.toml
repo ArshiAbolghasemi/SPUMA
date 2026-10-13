@@ -13,10 +13,11 @@ requires-python = ">=3.14"
 # datasets<5; [tool.uv] override-dependencies lifts those caps (the NLI path is verified by the tests).
 dependencies = [
     "datasets>=5.1.0",
-    "dvc[s3]>=3.67.1",  # 2.x resolves silently when 3.x is blocked, and breaks with current fsspec
+    "dvc[s3]>=3.67.1", # 2.x resolves silently when 3.x is blocked, and breaks with current fsspec
+    "dynaconf>=3.3.5",
     "langchain-core>=1.6.9",
     "langgraph>=1.2.14",
-    "math-verify[antlr4-9-3]>=0.9.0",  # antlr 4.9.3: dvc 3 -> hydra-core pins antlr4-python3-runtime==4.9.*
+    "math-verify[antlr4-9-3]>=0.9.0", # antlr 4.9.3: dvc 3 -> hydra-core pins antlr4-python3-runtime==4.9.*
     "numpy>=2.3.0", # vllm (via numba) needs <2.5
     "pydantic>=2.14.0",
     "python-dotenv>=1.2.1",
@@ -25,7 +26,7 @@ dependencies = [
     "spflow>=1.1.0",
     "sympy>=1.14.0",
     "transformers>=5.10.4,<5.18", # see override-dependencies (uqlm, vllm)
-    "uqlm==0.6.7",  # caps transformers/datasets <5: see override-dependencies
+    "uqlm==0.6.7", # caps transformers/datasets <5: see override-dependencies
 ]
 
 [project.optional-dependencies]

@@ -31,6 +31,7 @@ from typing import Any
 import numpy as np
 from langchain_core.messages import BaseMessage
 
+from spuma.common.config import to_plain
 from spuma.models.backend import (
     BackendCapabilities,
     BackendCapabilityError,
@@ -220,7 +221,7 @@ class VLLMBackend:
             model=self.config.name,
             tokenizer=self.info.tokenizer,
             seed=request.seed,
-            params=request.params.model_dump(),
+            params=to_plain(request.params),
             logprob_mode=request.logprobs,
             token_logprobs=lps,
             token_entropies=ents,

@@ -1,3 +1,5 @@
+import dataclasses
+
 import pytest
 
 from spuma.dataset.base import Problem
@@ -14,7 +16,7 @@ def _fake_loader(path, subset, split):
 
 def test_loader_ids_metadata_and_splits(config, set_settings):
     sizes = {"subsets": ["algebra", "geometry"], "train_samples": 5, "validation_samples": 3, "test_samples": 4}
-    set_settings(config.replace(dataset=config.dataset.model_copy(update=sizes)))
+    set_settings(dataclasses.replace(config, dataset=dataclasses.replace(config.dataset, **sizes)))
     splits = MathDataset(loader=_fake_loader).load()
     assert {k: len(v) for k, v in splits.items()} == {"train": 5, "validation": 3, "test": 4}
     p = splits["test"][0]

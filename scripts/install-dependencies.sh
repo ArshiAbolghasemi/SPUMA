@@ -52,7 +52,7 @@ uv sync "${args[@]}"
 
 if (( sandbox )); then
     command -v docker >/dev/null || { echo "--sandbox needs Docker" >&2; exit 1; }
-    image=$(uv run --no-sync python -c "from spuma.config import load_settings; print(load_settings().tools.registry['python_execute'].options['image'])")
+    image=$(uv run --no-sync python -c "from spuma.config import get_settings; print(get_settings().tools.registry['python_execute'].image)")
     echo "docker pull $image"
     docker pull "$image"
 fi

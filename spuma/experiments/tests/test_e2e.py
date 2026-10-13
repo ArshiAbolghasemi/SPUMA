@@ -7,6 +7,7 @@ import re
 
 import pytest
 
+from spuma.common.config import to_plain
 from spuma.conftest import ALL_CAPABILITIES
 from spuma.dataset.base import Problem
 from spuma.experiments.runner import ExperimentRunner
@@ -81,7 +82,7 @@ class FakeMathModel:
                     self.info.model,
                     self.info.tokenizer,
                     request.seed,
-                    request.params.model_dump(),
+                    to_plain(request.params),
                     request.logprobs,
                     lps,
                     ents,

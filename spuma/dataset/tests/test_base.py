@@ -1,3 +1,5 @@
+import dataclasses
+
 import pytest
 
 from spuma.dataset.base import Problem, load_hf_rows, make_splits, normalize
@@ -14,10 +16,10 @@ def sizes(config, set_settings):
     """Install `dataset:` settings with small split sizes (plus any overrides) for this test."""
 
     def install(**kw):
-        dataset = config.dataset.model_copy(
-            update={"train_samples": 5, "validation_samples": 3, "test_samples": 4} | kw
+        dataset = dataclasses.replace(
+            config.dataset, **({"train_samples": 5, "validation_samples": 3, "test_samples": 4} | kw)
         )
-        set_settings(config.replace(dataset=dataset))
+        set_settings(dataclasses.replace(config, dataset=dataset))
 
     install()
     return install

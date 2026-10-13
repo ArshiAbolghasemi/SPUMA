@@ -1,3 +1,4 @@
+import dataclasses
 import sys
 
 import pytest
@@ -18,5 +19,5 @@ def fake_vllm_module(monkeypatch):
 @pytest.fixture
 def vllm_backend(fake_vllm_module, tiny_model, tokenizer):
     llm = fake_vllm.LLM(tiny_model, [tokenizer.eos_token_id])
-    config = TINY_CONFIG.model_copy(update={"backend": "vllm"})
+    config = dataclasses.replace(TINY_CONFIG, **{"backend": "vllm"})
     return VLLMBackend(llm, tokenizer, config, fake_vllm.SamplingParams, fake_vllm.TokensPrompt)

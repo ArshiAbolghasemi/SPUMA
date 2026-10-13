@@ -1,5 +1,6 @@
 """vLLM backend logic against the fake `vllm` module (real raw log-probs from a tiny HF model)."""
 
+import dataclasses
 import sys
 
 import numpy as np
@@ -54,7 +55,7 @@ def test_sampling_params_translation(vllm_backend):
 
 
 def test_full_logprobs_need_uncapped_engine(vllm_backend):
-    vllm_backend.config = vllm_backend.config.model_copy(update={"vllm": VLLMBackendConfig(max_logprobs=20)})
+    vllm_backend.config = dataclasses.replace(vllm_backend.config, **{"vllm": VLLMBackendConfig(max_logprobs=20)})
     with pytest.raises(BackendCapabilityError, match="max_logprobs"):
         vllm_backend.sampling_params(SAMPLE, 1, 0, "full")
 
@@ -103,7 +104,7 @@ def test_teacher_forced_score_alignment(vllm_backend, tiny_backend):
 
 
 def test_score_respects_max_model_len(vllm_backend):
-    vllm_backend.config = vllm_backend.config.model_copy(update={"vllm": VLLMBackendConfig(max_model_len=4)})
+    vllm_backend.config = dataclasses.replace(vllm_backend.config, **{"vllm": VLLMBackendConfig(max_model_len=4)})
     with pytest.raises(BackendCapabilityError, match="max_model_len"):
         vllm_backend.score([1, 2, 3], [4, 5], full_vocabulary=False)
 

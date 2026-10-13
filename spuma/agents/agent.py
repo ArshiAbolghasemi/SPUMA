@@ -7,6 +7,7 @@ from typing import Any, Protocol
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
 from spuma.agents.trajectory import StepRecord
+from spuma.common.config import to_plain
 from spuma.common.utils import derive_seed
 from spuma.config import get_settings
 from spuma.models.backend import GenerationRequest, ModelBackend, generation_logprob_mode, require
@@ -67,7 +68,7 @@ class LLMAgent:
             tools_offered=self.effective_tools,
             tool_schemas=self.tool_schemas,
             prompt_ids=prompt_ids,
-            generation_params=self.generation.model_dump(),
+            generation_params=to_plain(self.generation),
             seed=seed,
             token_ids=gen.token_ids,
             text=gen.text,
@@ -108,5 +109,5 @@ class LLMAgent:
             "effective_tools": self.effective_tools,
             "max_steps": self.max_steps,
             "max_tool_calls": self.max_tool_calls,
-            "generation": self.generation.model_dump(),
+            "generation": to_plain(self.generation),
         }

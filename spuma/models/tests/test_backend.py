@@ -1,3 +1,5 @@
+import dataclasses
+
 import pytest
 
 from spuma.config import Settings
@@ -42,7 +44,9 @@ def test_engine_reuse_and_release(monkeypatch):
     _Fake.made.clear()
     cfg = ModelConfig()
     a = get_backend(cfg, "transformers")
-    b = get_backend(cfg.model_copy(update={"generation": cfg.generation.model_copy(update={"temperature": 0.1})}))
+    b = get_backend(
+        dataclasses.replace(cfg, **{"generation": dataclasses.replace(cfg.generation, **{"temperature": 0.1})})
+    )
     assert a is b and len(_Fake.made) == 1  # generation settings do not create a new engine
     release_backends()
     assert a.closed and not backend_module._INSTANCES
@@ -61,10 +65,10 @@ def test_require_and_missing():
 def test_fingerprints_separate_engines_and_generation():
     base = ModelConfig()
     assert base.fingerprint("transformers") != base.fingerprint("vllm")
-    hybrid = base.model_copy(update={"backend": "vllm", "scoring_backend": "transformers"})
+    hybrid = dataclasses.replace(base, **{"backend": "vllm", "scoring_backend": "transformers"})
     assert hybrid.scoring_kind == "transformers" and not hybrid.scores_at_generation
     # vLLM engine settings do not touch the Transformers engine identity, and vice versa
-    tweaked = hybrid.model_copy(update={"vllm": VLLMBackendConfig(gpu_memory_utilization=0.5)})
+    tweaked = dataclasses.replace(hybrid, **{"vllm": VLLMBackendConfig(gpu_memory_utilization=0.5)})
     assert tweaked.fingerprint("transformers") == hybrid.fingerprint("transformers")
     assert tweaked.generation_fingerprint() != hybrid.generation_fingerprint()
     assert scorer_id(base, "transformers").startswith("transformers:")
@@ -72,16 +76,20 @@ def test_fingerprints_separate_engines_and_generation():
 
 def test_generation_logprob_mode(config, set_settings):
     assert generation_logprob_mode(config.model) == "full"
-    hybrid = config.model.model_copy(update={"backend": "vllm", "scoring_backend": "transformers"})
+    hybrid = dataclasses.replace(config.model, **{"backend": "vllm", "scoring_backend": "transformers"})
     assert generation_logprob_mode(hybrid) == "none"
     uq = config.uncertainty
-    no_pe = uq.model_copy(update={"predictive_entropy": uq.predictive_entropy.model_copy(update={"enabled": False})})
-    set_settings(config.replace(uncertainty=no_pe, features=_features_without(config, "_pe")))
+    no_pe = dataclasses.replace(
+        uq, **{"predictive_entropy": dataclasses.replace(uq.predictive_entropy, **{"enabled": False})}
+    )
+    set_settings(dataclasses.replace(config, uncertainty=no_pe, features=_features_without(config, "_pe")))
     assert generation_logprob_mode(config.model) == "token"
 
 
 def _features_without(config, suffix):
-    return config.features.model_copy(update={"order": [f for f in config.features.order if not f.endswith(suffix)]})
+    return dataclasses.replace(
+        config.features, **{"order": [f for f in config.features.order if not f.endswith(suffix)]}
+    )
 
 
 @pytest.fixture

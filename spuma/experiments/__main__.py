@@ -14,7 +14,7 @@ import logging
 import os
 
 from spuma.common.logs import set_run_id, setup_logging
-from spuma.config import CONFIG_FILE_ENV, get_settings
+from spuma.config import SETTINGS_FILE_ENV, get_settings
 from spuma.experiments.runner import PHASES, ExperimentRunner
 
 logger = logging.getLogger("spuma.experiments")
@@ -32,7 +32,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.config:
-        os.environ[CONFIG_FILE_ENV] = args.config  # read by the first get_settings() call
+        os.environ[SETTINGS_FILE_ENV] = args.config  # read by the first get_settings() call
     settings = get_settings()
     setup_logging(settings.experiment.name)
     if args.list:

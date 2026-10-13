@@ -29,7 +29,7 @@ class MathToolProvider:
 
     def build(self, name: str) -> BaseTool:
         config = get_settings().tools.registry[name]
-        operation = config.options.get("operation", name)
+        operation = config.operation or name
         if operation not in self.tools:
             raise ToolUnavailable(f"provider {config.provider!r} has no operation {operation!r}")
         return self.tools[operation](name, self.runner, config.timeout_seconds)

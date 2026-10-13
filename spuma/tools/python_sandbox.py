@@ -105,14 +105,13 @@ class PythonSandboxProvider:
 
     def build(self, name: str) -> BaseTool:
         config = get_settings().tools.registry[name]
-        opts = config.options
         sandbox = DockerSandbox(
-            image=opts.get("image", "python:3.12-slim"),
+            image=config.image,
             timeout_seconds=config.timeout_seconds,
-            memory_mb=opts.get("memory_mb", 512),
-            cpus=opts.get("cpus", 1.0),
-            pids_limit=opts.get("pids_limit", 64),
-            network_access=opts.get("network_access", False),
+            memory_mb=config.memory_mb,
+            cpus=config.cpus,
+            pids_limit=config.pids_limit,
+            network_access=config.network_access,
         )
         try:
             sandbox.check_available()

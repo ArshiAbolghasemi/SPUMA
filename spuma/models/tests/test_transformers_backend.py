@@ -1,3 +1,4 @@
+import dataclasses
 import math
 
 import pytest
@@ -86,9 +87,8 @@ def test_chunked_scoring_matches(tiny_backend):
     prompt = _prompt(tiny_backend)
     tokens = prompt[:7]
     whole = tiny_backend.score(prompt, tokens, True)
-    tiny_backend.config = tiny_backend.config.model_copy(
-        update={"transformers": tiny_backend.config.transformers.model_copy(update={"scoring_chunk_size": 2})}
-    )
+    chunked = dataclasses.replace(tiny_backend.config.transformers, scoring_chunk_size=2)
+    tiny_backend.config = dataclasses.replace(tiny_backend.config, transformers=chunked)
     chunked = tiny_backend.score(prompt, tokens, True)
     assert chunked.token_entropies == pytest.approx(whole.token_entropies, abs=1e-5)
 

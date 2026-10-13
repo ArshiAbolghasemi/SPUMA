@@ -1,3 +1,4 @@
+import dataclasses
 import math
 
 import pytest
@@ -82,8 +83,8 @@ def with_uq(config, set_settings):
 
     def install(section, **fields):
         uq = config.uncertainty
-        part = getattr(uq, section).model_copy(update=fields)
-        return set_settings(config.replace(uncertainty=uq.model_copy(update={section: part})))
+        part = dataclasses.replace(getattr(uq, section), **fields)
+        return set_settings(dataclasses.replace(config, uncertainty=dataclasses.replace(uq, **{section: part})))
 
     return install
 
@@ -219,7 +220,7 @@ def test_build_token_scorers_share_engine(config, set_settings):
     scorers = build_token_scorers(lambda m, kind: pytest.fail("lazy"))
     assert scorers["solver"] is scorers["reviewer"]
     assert scorers["solver"].scorer == scorer_id(config.model, "transformers") and scorers["solver"].full_vocabulary
-    set_settings(config.replace(model=ModelConfig(backend="vllm", scoring_backend="transformers")))
+    set_settings(dataclasses.replace(config, model=ModelConfig(backend="vllm", scoring_backend="transformers")))
     assert build_token_scorers(lambda m, k: None)["solver"].scorer.startswith("transformers:")
 
 
@@ -276,7 +277,9 @@ def test_tool_metadata_separate_from_features(config):
 
 def test_aggregate_unknown_strategy(config, set_settings):
     with pytest.raises(ValueError):
-        set_settings(config.replace(aggregation=config.aggregation.model_copy(update={"nll": "median"})))
+        set_settings(
+            dataclasses.replace(config, aggregation=dataclasses.replace(config.aggregation, **{"nll": "median"}))
+        )
         aggregate_agent(_trajectory().agents[0], ["nll"])
 
 

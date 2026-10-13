@@ -20,6 +20,7 @@ from spflow.learn.learn_spn import partition_by_rdc
 from spflow.meta.data.scope import Scope
 from spflow.modules.leaves import Laplace, Normal
 
+from spuma.common.config import to_plain
 from spuma.config import get_settings
 from spuma.evaluation.metrics import binary_entropy
 from spuma.spn.config import SPNConfig
@@ -130,7 +131,7 @@ class ClassConditionalSPN:
 
     def save(self, path: Path) -> None:
         state = {
-            "config": self.config.model_dump(),
+            "config": to_plain(self.config),
             "feature_names": self.feature_names,
             "spns": self.spns,
             "log_prior": self.log_prior,

@@ -40,6 +40,7 @@ import numpy as np
 from spuma.agents.trajectory import Trajectory
 from spuma.agents.workflow import build_workflow
 from spuma.artifacts import FileArtifactStore
+from spuma.common.config import to_plain
 from spuma.common.utils import safe_name
 from spuma.config import PROJECT_ROOT, get_settings
 from spuma.dataset.base import AnswerGrader, DatasetProvider, Problem
@@ -177,7 +178,7 @@ class ExperimentRunner:
             },
             "variant_dirs": {v: self.variant_dir(v) for v in variants},
             "backends": {
-                "models": {k: m.model_dump(mode="json") for k, m in get_settings().all_models().items()},
+                "models": {k: to_plain(m) for k, m in get_settings().all_models().items()},
                 "plan": plans,
             },
         }

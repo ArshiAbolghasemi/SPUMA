@@ -1,3 +1,4 @@
+import dataclasses
 import json
 
 import pytest
@@ -69,7 +70,9 @@ def test_step_records_reconstruct_model_call(config, runner, scripted_backend_cl
 
 def test_hybrid_generation_requests_no_scores(config, set_settings, runner, scripted_backend_cls):
     set_settings(
-        config.replace(model=config.model.model_copy(update={"backend": "vllm", "scoring_backend": "transformers"}))
+        dataclasses.replace(
+            config, model=dataclasses.replace(config.model, **{"backend": "vllm", "scoring_backend": "transformers"})
+        )
     )
     backend = scripted_backend_cls(["\\boxed{1}", "\\boxed{1}"], kind="vllm")
     step = _workflow(backend, runner).run("p8", "1?").agents[0].steps[0]
@@ -77,7 +80,11 @@ def test_hybrid_generation_requests_no_scores(config, set_settings, runner, scri
 
 
 def test_max_steps_stops_tool_loop(config, set_settings, runner, scripted_backend_cls):
-    set_settings(config.replace(orchestration=config.orchestration.model_copy(update={"max_steps_per_agent": 2})))
+    set_settings(
+        dataclasses.replace(
+            config, orchestration=dataclasses.replace(config.orchestration, **{"max_steps_per_agent": 2})
+        )
+    )
     backend = scripted_backend_cls([SOLVE_CALL, SOLVE_CALL, "\\boxed{2}"])
     traj = _workflow(backend, runner).run("p3", "Solve 2x + 3 = 7.")
     solver = traj.agents[0]

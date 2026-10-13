@@ -1,34 +1,50 @@
 """`tools:` section: the global tool registry and execution settings."""
 
-from typing import Any, Literal
+from dataclasses import dataclass, field
 
-from pydantic import ConfigDict, Field
-
-from spuma.common.config import StrictConfig
+from spuma.common.config import check_choice, check_range
 
 
-class ToolConfig(StrictConfig):
-    model_config = ConfigDict(extra="allow", frozen=True)  # provider-specific options
+@dataclass(frozen=True)
+class ToolConfig:
+    """One `tools.registry` entry. Provider-specific options are explicit, optional fields."""
 
-    enabled: bool = True
     provider: str
-    timeout_seconds: float = Field(10.0, gt=0)
+    enabled: bool = True
+    timeout_seconds: float = 10.0
+    operation: str | None = None  # math providers: operation to expose under this name (default: the name)
+    # python_sandbox provider
+    image: str = "python:3.12-slim"
+    memory_mb: int = 512
+    cpus: float = 1.0
+    pids_limit: int = 64
+    network_access: bool = False
 
-    @property
-    def options(self) -> dict[str, Any]:
-        return dict(self.model_extra or {})
+    def __post_init__(self) -> None:
+        check_range("tools.registry.*.timeout_seconds", self.timeout_seconds, gt=0)
+        check_range("tools.registry.*.memory_mb", self.memory_mb, gt=0)
+        check_range("tools.registry.*.cpus", self.cpus, gt=0)
+        check_range("tools.registry.*.pids_limit", self.pids_limit, gt=0)
 
 
-class ToolExecutionConfig(StrictConfig):
+@dataclass(frozen=True)
+class ToolExecutionConfig:
+    """`tools.execution:` section."""
+
     log_calls: bool = True
     save_results: bool = True
-    max_output_tokens: int = Field(1024, gt=0)
-    on_error: Literal["return_error", "raise"] = "return_error"
+    max_output_tokens: int = 1024
+    on_error: str = "return_error"
+
+    def __post_init__(self) -> None:
+        check_range("tools.execution.max_output_tokens", self.max_output_tokens, gt=0)
+        check_choice("tools.execution.on_error", self.on_error, ("return_error", "raise"))
 
 
-class ToolsConfig(StrictConfig):
+@dataclass(frozen=True)
+class ToolsConfig:
     """`tools:` section."""
 
     enabled: bool = True
-    registry: dict[str, ToolConfig] = Field(default_factory=dict)
-    execution: ToolExecutionConfig = Field(default_factory=ToolExecutionConfig)
+    registry: dict[str, ToolConfig] = field(default_factory=dict)
+    execution: ToolExecutionConfig = field(default_factory=ToolExecutionConfig)

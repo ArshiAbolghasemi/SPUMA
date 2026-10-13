@@ -1,3 +1,5 @@
+import dataclasses
+
 import numpy as np
 import pytest
 from scipy.stats import norm
@@ -18,7 +20,7 @@ def make_spn(config, set_settings):
     """A ClassConditionalSPN built from the settings, with these `spn:` overrides installed."""
 
     def make(**spn):
-        set_settings(config.replace(spn=config.spn.model_copy(update=spn)))
+        set_settings(dataclasses.replace(config, spn=dataclasses.replace(config.spn, **spn)))
         return ClassConditionalSPN()
 
     return make

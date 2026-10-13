@@ -1,3 +1,4 @@
+import dataclasses
 import json
 import shutil
 import subprocess
@@ -85,7 +86,7 @@ def test_disabled_tool_rejected_even_if_allowed(registry):
 
 
 def test_runtime_global_disable(config, set_settings, runner):
-    set_settings(config.replace(tools=config.tools.model_copy(update={"enabled": False})))
+    set_settings(dataclasses.replace(config, tools=dataclasses.replace(config.tools, **{"enabled": False})))
     reg = build_tool_registry(default_providers(runner))
     assert reg.effective_tools(["sympy_solve"]) == []
     assert _run(ToolExecutor(reg), "sympy_solve", {"equations": ["x"]}, ["sympy_solve"]).status == "disabled"
@@ -114,8 +115,8 @@ def test_tool_error_is_structured(registry):
 
 
 def _execution(config, set_settings, **update):
-    execution = config.tools.execution.model_copy(update=update)
-    set_settings(config.replace(tools=config.tools.model_copy(update={"execution": execution})))
+    execution = dataclasses.replace(config.tools.execution, **update)
+    set_settings(dataclasses.replace(config, tools=dataclasses.replace(config.tools, **{"execution": execution})))
 
 
 def test_output_truncated_by_tokens(registry, config, set_settings):

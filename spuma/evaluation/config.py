@@ -1,26 +1,40 @@
 """`evaluation:` section."""
 
-from typing import Literal
+from dataclasses import dataclass, field
 
-from pydantic import Field
-
-from spuma.common.config import StrictConfig
+from spuma.common.config import check_choice, check_range
 
 # Names registered in spuma.evaluation.risk.RISK_MODELS; extend both when adding a risk model.
-RiskModelName = Literal["spn"]
+RISK_MODEL_NAMES = ("spn",)
 
 
-class BootstrapConfig(StrictConfig):
+@dataclass(frozen=True)
+class BootstrapConfig:
+    """`evaluation.bootstrap:` section."""
+
     enabled: bool = True
-    iterations: int = Field(1000, gt=0)
-    confidence: float = Field(0.95, gt=0.0, lt=1.0)
-    cluster_by: Literal["problem_id"] = "problem_id"
+    iterations: int = 1000
+    confidence: float = 0.95
+    cluster_by: str = "problem_id"
+
+    def __post_init__(self) -> None:
+        check_range("evaluation.bootstrap.iterations", self.iterations, gt=0)
+        check_range("evaluation.bootstrap.confidence", self.confidence, gt=0.0, lt=1.0)
+        check_choice("evaluation.bootstrap.cluster_by", self.cluster_by, ("problem_id",))
 
 
-class EvaluationConfig(StrictConfig):
+@dataclass(frozen=True)
+class EvaluationConfig:
     """`evaluation:` section."""
 
-    risk_models: list[RiskModelName] = Field(default_factory=lambda: ["spn"], min_length=1)
-    metrics: list[str] = Field(default_factory=lambda: ["auroc", "auarc"])
-    ece_bins: int = Field(15, gt=0)
-    bootstrap: BootstrapConfig = Field(default_factory=BootstrapConfig)
+    risk_models: list[str] = field(default_factory=lambda: ["spn"])
+    metrics: list[str] = field(default_factory=lambda: ["auroc", "auarc"])
+    ece_bins: int = 15
+    bootstrap: BootstrapConfig = field(default_factory=BootstrapConfig)
+
+    def __post_init__(self) -> None:
+        if not self.risk_models:
+            raise ValueError("evaluation.risk_models must name at least one model")
+        for name in self.risk_models:
+            check_choice("evaluation.risk_models[]", name, RISK_MODEL_NAMES)
+        check_range("evaluation.ece_bins", self.ece_bins, gt=0)

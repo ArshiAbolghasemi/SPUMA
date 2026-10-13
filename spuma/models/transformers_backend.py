@@ -20,6 +20,7 @@ from typing import Any
 import torch
 from langchain_core.messages import BaseMessage
 
+from spuma.common.config import to_plain
 from spuma.models.backend import (
     BackendCapabilities,
     BackendInfo,
@@ -165,7 +166,7 @@ class TransformersBackend:
                     model=self.config.name,
                     tokenizer=self.info.tokenizer,
                     seed=request.seed,
-                    params=params.model_dump(),
+                    params=to_plain(params),
                     logprob_mode=request.logprobs,
                     token_logprobs=lps,
                     token_entropies=ents,

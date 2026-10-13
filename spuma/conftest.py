@@ -16,8 +16,9 @@ from langchain_core.messages import BaseMessage
 from tokenizers import Tokenizer, decoders, models, pre_tokenizers, trainers
 from transformers import PreTrainedTokenizerFast, Qwen3Config, Qwen3ForCausalLM
 
+from spuma.common.config import to_plain
 from spuma.config import Settings, get_settings
-from spuma.config import loader as config_loader
+from spuma.config import settings as settings_module
 from spuma.models.backend import (
     BackendCapabilities,
     BackendInfo,
@@ -48,7 +49,7 @@ CHAT_TEMPLATE = (
 @pytest.fixture(autouse=True)
 def isolated_env(tmp_path, monkeypatch):
     """Never read the project .env or inherit SPUMA_* / HF_TOKEN from the shell."""
-    monkeypatch.setattr(config_loader, "DEFAULT_DOTENV_FILE", tmp_path / "no.env")
+    monkeypatch.setattr(settings_module, "DEFAULT_DOTENV_FILE", tmp_path / "no.env")
     for var in [v for v in os.environ if v.startswith("SPUMA_")] + ["HF_TOKEN"]:
         monkeypatch.setenv(var, "")  # record the original so teardown restores it (load_dotenv writes os.environ)
         monkeypatch.delenv(var)
@@ -68,7 +69,7 @@ def set_settings(monkeypatch):
     """Make `get_settings()` return the given settings for this test (code reads settings, never receives them)."""
 
     def install(settings: Settings) -> Settings:
-        monkeypatch.setattr(config_loader, "load_settings", lambda *args, **kwargs: settings)
+        monkeypatch.setattr(settings_module, "load_settings", lambda *args, **kwargs: settings)
         get_settings.cache_clear()
         return settings
 
@@ -79,7 +80,7 @@ def set_settings(monkeypatch):
 def raw_config() -> dict[str, Any]:
     import yaml
 
-    return yaml.safe_load(Path(config_loader.DEFAULT_CONFIG_FILE).read_text())
+    return yaml.safe_load(Path(settings_module.DEFAULT_SETTINGS_FILE).read_text())
 
 
 TINY_CONFIG = ModelConfig(name="tiny-qwen3", dtype="float32", transformers=TransformersBackendConfig(device="cpu"))
@@ -197,7 +198,7 @@ class ScriptedBackend:
                     model=self.info.model,
                     tokenizer=self.info.tokenizer,
                     seed=request.seed,
-                    params=request.params.model_dump(),
+                    params=to_plain(request.params),
                     logprob_mode=request.logprobs,
                     token_logprobs=lps,
                     token_entropies=ents,

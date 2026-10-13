@@ -14,6 +14,7 @@ Latency and memory differ across engines by design; outputs of different engines
 """
 
 import argparse
+import dataclasses
 import logging
 import os
 import time
@@ -24,7 +25,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from spuma.artifacts import FileArtifactStore
 from spuma.common.logs import setup_logging
-from spuma.config import CONFIG_FILE_ENV, PROJECT_ROOT, get_settings
+from spuma.config import PROJECT_ROOT, SETTINGS_FILE_ENV, get_settings
 from spuma.dataset.registry import get_dataset
 from spuma.models.backend import GenerationRequest, ModelBackend, get_backend, release_backends
 
@@ -55,7 +56,7 @@ def benchmark_backend(backend: ModelBackend, prompts: list[list[int]]) -> dict[s
         backend.score(p, m.token_ids, full_vocabulary=True)
     score_s = time.perf_counter() - start
 
-    se_params = gen_cfg.model_copy(update={"temperature": se.temperature, "top_p": se.top_p, "top_k": None})
+    se_params = dataclasses.replace(gen_cfg, temperature=se.temperature, top_p=se.top_p, top_k=None)
     start = time.perf_counter()
     samples = backend.generate_batch([GenerationRequest(p, se_params, seed, se.n) for p in prompts])
     se_s = time.perf_counter() - start
@@ -90,7 +91,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.config:
-        os.environ[CONFIG_FILE_ENV] = args.config  # read by the first get_settings() call
+        os.environ[SETTINGS_FILE_ENV] = args.config  # read by the first get_settings() call
     config = get_settings()
     setup_logging("benchmark")
     problems = get_dataset().load()["test"][: args.problems]

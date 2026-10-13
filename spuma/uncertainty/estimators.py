@@ -19,6 +19,7 @@ from collections.abc import Callable
 from typing import Any, Protocol
 
 from spuma.agents.trajectory import StepRecord, Trajectory
+from spuma.common.config import to_plain
 from spuma.common.utils import derive_seed, stable_hash
 from spuma.config import get_settings
 from spuma.models.backend import BackendCapabilityError, GenerationRequest, ModelBackend, require, scorer_id
@@ -118,7 +119,7 @@ def semantic_policy() -> dict[str, Any]:
 
 
 def _sample_key(step: StepRecord) -> str:
-    return stable_hash({"params": semantic_params(step).model_dump(), "n": _se().n, "prompt": step.prompt_ids})
+    return stable_hash({"params": to_plain(semantic_params(step)), "n": _se().n, "prompt": step.prompt_ids})
 
 
 class SemanticSampler:
@@ -159,7 +160,7 @@ class SemanticSampler:
                 "num_tokens": [r.num_tokens for r in results],
                 "finish_reasons": [r.finish_reason for r in results],
                 "seed": request.seed,
-                "params": request.params.model_dump(),
+                "params": to_plain(request.params),
                 "backend": self.backend.name,
                 "latency_s": sum(r.latency_s for r in results),
                 "policy": semantic_policy(),
