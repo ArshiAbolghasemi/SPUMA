@@ -12,6 +12,7 @@ from spuma.features import extract_features, tool_metadata
 from spuma.models.backend import BackendCapabilities, BackendCapabilityError, GenerationRequest, scorer_id
 from spuma.models.config import GenerationConfig, ModelConfig
 from spuma.uncertainty.aggregation import aggregate_agent, mean, rms
+from spuma.uncertainty.equivalence import AnswerAwareNLI
 from spuma.uncertainty.estimators import (
     LabelOrderedNLI,
     MissingScoresError,
@@ -97,8 +98,9 @@ def _sampled(backend, step=None):
     return step
 
 
-def test_semantic_entropy_uses_uqlm_on_step_text_plus_samples(scripted_backend_cls, rule_nli):
-    # step text "t" has no number, so it forms its own cluster under the rule NLI
+def test_semantic_entropy_uses_uqlm_on_step_text_plus_samples(scripted_backend_cls, rule_nli, with_uq):
+    # equivalence: nli (rule NLI stand-in); step text "t" has no number, so it forms its own cluster
+    with_uq("semantic_entropy", equivalence="nli")
     samples = ["\\boxed{2}"] * 5 + ["so it is 2.0"] * 2 + ["\\boxed{3}"] * 2 + [CALL]
     backend = scripted_backend_cls([], samples={"": samples})
     step = _sampled(backend)
@@ -133,7 +135,7 @@ def test_semantic_samples_are_cached_and_batched(scripted_backend_cls, with_uq):
 
 def test_semantic_entropy_from_fixed_texts_is_backend_independent():
     """Fixed texts give the same SE whichever backend sampled them; all agree -> 0."""
-    value, details = SemanticEntropy().from_texts("x = 4", ["\\boxed{4}"] * 10)
+    value, details = SemanticEntropy().from_texts("so x = 4, \\boxed{4}", ["\\boxed{4}"] * 10)
     assert value == pytest.approx(0.0) and details["semantic_negentropy"] == pytest.approx(1.0)
 
 
@@ -323,3 +325,29 @@ def test_label_ordered_nli_maps_any_label_order_to_uqlms(monkeypatch):
     _fake_nli(monkeypatch, {0: "yes", 1: "no", 2: "maybe"}, [0.3, 0.3, 0.4])
     with pytest.raises(ValueError, match="lack"):
         LabelOrderedNLI(nli_model_name="any")
+
+
+def test_answer_aware_equivalence_uses_math_verify_then_nli(rule_nli):
+    """Default `equivalence: answer_aware`: boxed answers by math-verify, unanswered texts by the NLI model."""
+    step = "Long derivation ... so the answer is \\boxed{\\frac{1}{2}}"
+    samples = (
+        ["Different words entirely, \\boxed{0.5}"] * 3  # same answer, other text: math-verify merges
+        + ["\\boxed{1/2}"]
+        + ["Hence \\boxed{2}"] * 2  # a different answer
+        + [CALL] * 2  # no boxed answer: NLI decides (rule NLI: both end in 2 -> same)
+        + ["ran out of tokens at step 7", "ran out of tokens at step 9"]  # NLI: different final numbers
+    )
+    value, details = SemanticEntropy().from_texts(step, samples)
+    p = [5 / 11, 2 / 11, 2 / 11, 1 / 11, 1 / 11]
+    assert value == pytest.approx(-sum(x * math.log(x) for x in p))
+    assert details["equivalence"] == "answer_aware"
+    assert rule_nli.pairs and all("boxed" not in a + b for a, b in rule_nli.pairs)  # NLI never sees answer pairs
+
+
+def test_answer_aware_loads_nli_only_when_needed():
+    loads = []
+    nli = AnswerAwareNLI(lambda: loads.append(1))
+    assert [
+        r["entailment"] for r in nli.get_nli_results_batch([("\\boxed{3}", "so \\boxed{3.0}"), ("\\boxed{3}", "x")])
+    ] == [True, False]
+    assert loads == [] and nli.counts == {"math_verify": 1, "answer_vs_none": 1, "nli": 0}

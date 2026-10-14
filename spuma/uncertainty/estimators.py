@@ -28,6 +28,7 @@ from spuma.config import get_settings
 from spuma.models.backend import BackendCapabilityError, GenerationRequest, ModelBackend, require, scorer_id
 from spuma.models.config import GenerationConfig
 from spuma.uncertainty.config import SemanticEntropyConfig
+from spuma.uncertainty.equivalence import AnswerAwareNLI
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +114,7 @@ def semantic_policy() -> dict[str, Any]:
         "context": "frozen pre-step prompt_ids incl. prior tool observations",
         "tool_call_policy": config.tool_call_policy,
         "top_k": None,
-        "clustering": "uqlm.BlackBoxUQ semantic_negentropy (NLI entailment in either direction)",
+        "clustering": f"uqlm SemanticEntropy, equivalence={config.equivalence}",
         "clustered_texts": "the step's own text + its n samples",
         "nli_model": config.nli_model_name,
         "nli_prompt": None,  # prompts_in_nli=False: step contexts are long chat transcripts
@@ -197,26 +198,35 @@ class LabelOrderedNLI(NLI):
         return super().predict_batch(pairs)[:, self.order]
 
 
-def load_uqlm_semantic_entropy() -> Any:
-    """UQLM's semantic-entropy scorer (the one behind `BlackBoxUQ`'s `semantic_negentropy`) on our NLI model."""
+def load_nli() -> Any:
     config = _se()
-    nli = LabelOrderedNLI(
+    return LabelOrderedNLI(
         nli_model_name=config.nli_model_name,
         max_length=config.nli_max_length,
         max_tokens=config.nli_max_tokens,
         device=config.nli_device,
         batch_size=config.nli_batch_size,
     )
+
+
+def load_uqlm_semantic_entropy() -> Any:
+    """UQLM's semantic-entropy scorer (the one behind `BlackBoxUQ`'s `semantic_negentropy`) on our equivalence.
+
+    `equivalence: answer_aware` (default): math-verify for texts that box an answer, the NLI model for the
+    rest (`AnswerAwareNLI`, which loads the model only when needed). `nli`: the NLI model for every pair.
+    """
+    nli = AnswerAwareNLI(load_nli) if _se().equivalence == "answer_aware" else load_nli()
     # llm=None: responses come from SPUMA's backends; UQLM only clusters them (no prompt in the NLI input)
     return UQLMSemanticEntropy(llm=None, use_best=False, prompts_in_nli=False, nli=nli)
 
 
 class SemanticEntropy:
     """Semantic entropy of a step from UQLM's `SemanticEntropy` scorer (what `BlackBoxUQ` runs for
-    `semantic_negentropy`), on the configured NLI model (`LabelOrderedNLI`).
+    `semantic_negentropy`), with the configured equivalence (`load_uqlm_semantic_entropy`).
 
-    UQLM clusters the step's own generated text together with its n stored samples with the NLI model (a
-    text joins every cluster whose first member it entails or is entailed by) and returns
+    UQLM clusters the step's own generated text together with its n stored samples (a text joins every
+    cluster whose first member is equivalent to it: same math-verified answer, else NLI entailment in
+    either direction) and returns
         SE = -Σ_c p_c ln p_c,  p_c = cluster frequency over the n + 1 texts      (nats)
     which is the step metric; `semantic_negentropy` = 1 - SE / ln(n + 1) is stored with it. No prompt is
     passed to the NLI model. The model is loaded once, on first use, and shared by all agents.
@@ -268,7 +278,16 @@ class SemanticEntropy:
             if math.isnan(value):
                 raise MissingScoresError("UQLM returned NaN semantic entropy")
             negentropy = 1.0 - value / math.log(self.config.n + 1)
-            out.append((value, {"semantic_negentropy": negentropy, "nli_model": self.config.nli_model_name}))
+            out.append(
+                (
+                    value,
+                    {
+                        "semantic_negentropy": negentropy,
+                        "equivalence": self.config.equivalence,
+                        "nli_model": self.config.nli_model_name,
+                    },
+                )
+            )
         return out
 
 

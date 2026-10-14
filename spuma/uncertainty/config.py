@@ -38,6 +38,9 @@ class SemanticEntropyConfig:
     max_new_tokens: int | None = None  # None: the agent's max_new_tokens
     # Sampled tool calls are never executed; their text is clustered like any other continuation.
     tool_call_policy: str = "no_execution"
+    # when two of a step's texts are "the same": answer_aware = equivalent \boxed{} answers (math-verify) when
+    # both texts box one, the NLI model otherwise; nli = the NLI model for every pair
+    equivalence: str = "answer_aware"
     nli_model_name: str = "tasksource/ModernBERT-large-nli"  # any 3-way NLI model (labels mapped by name)
     nli_max_length: int = 8000  # characters kept per text (UQLM truncates longer ones, with a warning)
     nli_max_tokens: int | None = 2048  # tokens per (premise, hypothesis) pair; None: the model's own limit
@@ -55,6 +58,7 @@ class SemanticEntropyConfig:
         check_range(f"{key}.max_new_tokens", self.max_new_tokens, gt=0)
         check_choice(f"{key}.tool_call_policy", self.tool_call_policy, ("no_execution",))
         check_range(f"{key}.nli_max_length", self.nli_max_length, gt=0)
+        check_choice(f"{key}.equivalence", self.equivalence, ("answer_aware", "nli"))
         check_range(f"{key}.nli_max_tokens", self.nli_max_tokens, gt=0)
         check_range(f"{key}.nli_batch_size", self.nli_batch_size, gt=0)
 
