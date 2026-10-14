@@ -18,7 +18,8 @@ import math
 from collections.abc import Callable
 from typing import Any, Protocol
 
-from uqlm import BlackBoxUQ
+from uqlm.nli.nli import NLI
+from uqlm.scorers import SemanticEntropy as UQLMSemanticEntropy
 
 from spuma.agents.trajectory import StepRecord, Trajectory
 from spuma.common.config import to_plain
@@ -173,29 +174,52 @@ class SemanticSampler:
         )
 
 
-def load_black_box_uq() -> Any:
-    """UQLM `BlackBoxUQ` with the `semantic_negentropy` scorer (loads the NLI model)."""
+class LabelOrderedNLI(NLI):
+    """UQLM's NLI for any 3-way NLI model: outputs reordered to UQLM's fixed [contradiction, neutral, entailment].
+
+    UQLM reads column 0 as contradiction and column 2 as entailment; a model that orders its labels
+    differently (tasksource/ModernBERT-large-nli: entailment, neutral, contradiction) would otherwise be
+    read backwards. The order comes from the model's own `config.id2label`. `max_tokens` is the token
+    budget of a (premise, hypothesis) pair (None: the model's own limit).
+    """
+
+    def __init__(self, max_tokens: int | None = None, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        labels = {str(v).lower(): int(k) for k, v in self.model.config.id2label.items()}
+        missing = [name for name in self.label_mapping if name not in labels]
+        if missing:
+            raise ValueError(f"NLI model labels {sorted(labels)} lack {missing}")
+        self.order = [labels[name] for name in self.label_mapping]
+        if max_tokens is not None:
+            self.max_tokens = max_tokens
+
+    def predict_batch(self, pairs: list[tuple[str, str]]) -> Any:
+        return super().predict_batch(pairs)[:, self.order]
+
+
+def load_uqlm_semantic_entropy() -> Any:
+    """UQLM's semantic-entropy scorer (the one behind `BlackBoxUQ`'s `semantic_negentropy`) on our NLI model."""
     config = _se()
-    return BlackBoxUQ(
-        llm=None,  # responses come from SPUMA's backends; UQLM only scores them
-        scorers=["semantic_negentropy"],
+    nli = LabelOrderedNLI(
         nli_model_name=config.nli_model_name,
-        use_best=False,
-        device=config.nli_device,
         max_length=config.nli_max_length,
-        nli_batch_size=config.nli_batch_size,
+        max_tokens=config.nli_max_tokens,
+        device=config.nli_device,
+        batch_size=config.nli_batch_size,
     )
+    # llm=None: responses come from SPUMA's backends; UQLM only clusters them (no prompt in the NLI input)
+    return UQLMSemanticEntropy(llm=None, use_best=False, prompts_in_nli=False, nli=nli)
 
 
 class SemanticEntropy:
-    """Semantic entropy of a step from UQLM: `BlackBoxUQ(scorers=["semantic_negentropy"]).score(...)`.
+    """Semantic entropy of a step from UQLM's `SemanticEntropy` scorer (what `BlackBoxUQ` runs for
+    `semantic_negentropy`), on the configured NLI model (`LabelOrderedNLI`).
 
-    UQLM clusters the step's own generated text together with its n stored samples with its NLI model (a
+    UQLM clusters the step's own generated text together with its n stored samples with the NLI model (a
     text joins every cluster whose first member it entails or is entailed by) and returns
-        semantic_negentropy = 1 - SE / ln(n + 1),   SE = -Σ_c p_c ln p_c,  p_c = cluster frequency over n + 1 texts.
-    The step metric is SE in nats, recovered exactly from that score (same scale as PE and NLL);
-    `semantic_negentropy` itself is stored with the step. BlackBoxUQ.score passes no prompt to the NLI
-    model. The model is loaded once, on first use, and shared by all agents.
+        SE = -Σ_c p_c ln p_c,  p_c = cluster frequency over the n + 1 texts      (nats)
+    which is the step metric; `semantic_negentropy` = 1 - SE / ln(n + 1) is stored with it. No prompt is
+    passed to the NLI model. The model is loaded once, on first use, and shared by all agents.
     """
 
     name = "se"
@@ -207,9 +231,10 @@ class SemanticEntropy:
     @property
     def uq(self) -> Any:
         if self._uq is None:
-            self._uq = load_black_box_uq()
+            self._uq = load_uqlm_semantic_entropy()
             logger.info(
-                "uqlm BlackBoxUQ ready", extra={"scorer": "semantic_negentropy", "nli": self.config.nli_model_name}
+                "uqlm semantic entropy ready",
+                extra={"nli": self.config.nli_model_name, "max_tokens": self.config.nli_max_tokens},
             )
         return self._uq
 
@@ -217,7 +242,7 @@ class SemanticEntropy:
         return self.estimate_steps([step])[0]
 
     def estimate_steps(self, steps: list[StepRecord]) -> list[tuple[float, dict[str, Any]]]:
-        """All given steps in one BlackBoxUQ.score call (UQLM has a fixed per-call overhead)."""
+        """All given steps in one UQLM score call (UQLM has a fixed per-call overhead)."""
         samples = []
         for step in steps:
             stored = step.uq_details.get(SE_SAMPLES_KEY)
@@ -239,10 +264,10 @@ class SemanticEntropy:
             raise MissingScoresError(f"semantic samples per step must be exactly n={self.config.n}")
         result = self.uq.score(responses=responses, sampled_responses=samples, show_progress_bars=False)
         out = []
-        for negentropy in map(float, result.data["semantic_negentropy"]):
-            if math.isnan(negentropy):
-                raise MissingScoresError("UQLM returned NaN semantic_negentropy")
-            value = (1.0 - negentropy) * math.log(self.config.n + 1)
+        for value in map(float, result.data["discrete_entropy_values"]):
+            if math.isnan(value):
+                raise MissingScoresError("UQLM returned NaN semantic entropy")
+            negentropy = 1.0 - value / math.log(self.config.n + 1)
             out.append((value, {"semantic_negentropy": negentropy, "nli_model": self.config.nli_model_name}))
         return out
 

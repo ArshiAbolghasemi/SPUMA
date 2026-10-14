@@ -1,8 +1,11 @@
 import dataclasses
 import math
+import types
 
+import numpy as np
 import pytest
 from langchain_core.messages import HumanMessage
+from uqlm.nli.nli import NLI
 
 from spuma.agents.trajectory import AgentTrace, StepRecord, Trajectory
 from spuma.features import extract_features, tool_metadata
@@ -10,6 +13,7 @@ from spuma.models.backend import BackendCapabilities, BackendCapabilityError, Ge
 from spuma.models.config import GenerationConfig, ModelConfig
 from spuma.uncertainty.aggregation import aggregate_agent, mean, rms
 from spuma.uncertainty.estimators import (
+    LabelOrderedNLI,
     MissingScoresError,
     NegativeLogLikelihood,
     PredictiveEntropy,
@@ -152,7 +156,7 @@ def test_trajectory_scored_in_one_uqlm_call(config, scripted_backend_cls, monkey
 
 def test_one_nli_model_shared_by_agents(config, monkeypatch):
     loads = []
-    monkeypatch.setattr("spuma.uncertainty.estimators.load_black_box_uq", lambda: loads.append(1) or object())
+    monkeypatch.setattr("spuma.uncertainty.estimators.load_uqlm_semantic_entropy", lambda: loads.append(1) or object())
     ests = build_estimators()
     se = [e for e in ests["solver"] if e.name == "se"][0]
     assert se is [e for e in ests["reviewer"] if e.name == "se"][0] and loads == []  # lazy
@@ -297,3 +301,25 @@ def test_score_trajectory_and_rows(config, scripted_backend_cls):
     assert rows[0]["tool_calls"] == [{"tool": "sympy_solve", "status": "success"}]
     assert traj.agents[0].steps[0].metrics == {}  # input not mutated
     assert len(backend.calls) == 3  # one 10-sample SE request per step, no tool execution
+
+
+def _fake_nli(monkeypatch, id2label, probs):
+    """NLI.__init__ / predict_batch replaced: no model download, a model with labels `id2label`."""
+
+    def init(self, **kwargs):
+        self.label_mapping, self.max_tokens = ["contradiction", "neutral", "entailment"], 512
+        self.model = types.SimpleNamespace(config=types.SimpleNamespace(id2label=id2label))
+
+    monkeypatch.setattr(NLI, "__init__", init)
+    monkeypatch.setattr(NLI, "predict_batch", lambda self, pairs: np.array([probs]))
+
+
+def test_label_ordered_nli_maps_any_label_order_to_uqlms(monkeypatch):
+    # ModernBERT-style order: the model says "entailment" with 0.9
+    _fake_nli(monkeypatch, {0: "entailment", 1: "neutral", 2: "contradiction"}, [0.9, 0.08, 0.02])
+    nli = LabelOrderedNLI(max_tokens=2048, nli_model_name="any")
+    assert nli.max_tokens == 2048
+    assert nli.predict_batch([("a", "b")]).tolist() == [[0.02, 0.08, 0.9]]  # UQLM reads column 2 as entailment
+    _fake_nli(monkeypatch, {0: "yes", 1: "no", 2: "maybe"}, [0.3, 0.3, 0.4])
+    with pytest.raises(ValueError, match="lack"):
+        LabelOrderedNLI(nli_model_name="any")

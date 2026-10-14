@@ -15,7 +15,6 @@ from typing import Any
 
 import pytest
 import torch
-import uqlm.scorers.shortform.black_box as black_box
 import uqlm.scorers.shortform.entropy as entropy
 import yaml
 from langchain_core.messages import BaseMessage
@@ -297,15 +296,8 @@ def rule_nli(request, monkeypatch):
         return None
     nli = RuleNLI()
 
-    real = estimators.load_black_box_uq
-
-    def load():
-
-        # UQLM's SemanticEntropy.score ends with a fixed time.sleep(0.1); skip it in tests only
-        monkeypatch.setattr(entropy, "time", types.SimpleNamespace(sleep=lambda s: None, time=time.time))
-        with pytest.MonkeyPatch.context() as m:  # real BlackBoxUQ, rule NLI instead of the DeBERTa download
-            m.setattr(black_box, "NLI", lambda **kwargs: nli)
-            return real()
-
-    monkeypatch.setattr(estimators, "load_black_box_uq", load)
+    # UQLM's SemanticEntropy.score ends with a fixed time.sleep(0.1); skip it in tests only
+    monkeypatch.setattr(entropy, "time", types.SimpleNamespace(sleep=lambda s: None, time=time.time))
+    # real UQLM scorer, clustering and entropy; rule NLI instead of the model download
+    monkeypatch.setattr(estimators, "LabelOrderedNLI", lambda **kwargs: nli)
     return nli

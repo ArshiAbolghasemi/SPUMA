@@ -124,7 +124,12 @@ def test_unknown_key_rejected(raw_config):
 
 def test_semantic_entropy_is_uqlm_only(raw_config, config):
     se = config.uncertainty.semantic_entropy
-    assert se.backend == "uqlm" and se.nli_model_name == "microsoft/deberta-large-mnli" and se.n == 10
+    assert (
+        se.backend == "uqlm"
+        and se.nli_model_name == "tasksource/ModernBERT-large-nli"
+        and se.nli_max_tokens == 2048
+        and se.n == 10
+    )
     for removed in ("native", "math_equivalence"):
         raw_config["uncertainty"]["semantic_entropy"]["backend"] = removed
         with pytest.raises((ValueError, TypeError)):

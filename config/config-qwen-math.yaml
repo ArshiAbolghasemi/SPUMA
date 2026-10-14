@@ -143,8 +143,9 @@ uncertainty:
     max_new_tokens: null     # null: the agent's max_new_tokens
     tool_call_policy: no_execution
     # clustering (UQLM): the step's text + its n samples, NLI entailment in either direction
-    nli_model_name: microsoft/deberta-large-mnli
-    nli_max_length: 2000     # characters per text; UQLM truncates longer ones
+    nli_model_name: tasksource/ModernBERT-large-nli  # any 3-way NLI model; labels are mapped by name
+    nli_max_length: 8000     # characters per text; UQLM truncates longer ones
+    nli_max_tokens: 2048     # tokens per text pair (ModernBERT-large-nli limit; DeBERTa-MNLI: 512)
     nli_batch_size: 32
     nli_device: null         # null: CUDA, then MPS, then CPU
 
