@@ -8,7 +8,6 @@ from langchain_core.messages import HumanMessage
 from uqlm.nli.nli import NLI
 
 from spuma.agents.trajectory import AgentTrace, StepRecord, Trajectory
-from spuma.features import extract_features, tool_metadata
 from spuma.models.backend import BackendCapabilities, BackendCapabilityError, GenerationRequest, scorer_id
 from spuma.models.config import GenerationConfig, ModelConfig
 from spuma.uncertainty.aggregation import aggregate_agent, mean, rms
@@ -27,6 +26,7 @@ from spuma.uncertainty.estimators import (
     score_trajectory,
     step_metric_rows,
 )
+from spuma.uncertainty.features import extract_features, tool_metadata
 
 CALL = '<tool_call>{"name": "sympy_solve", "arguments": {"equations": ["x = 2"]}}</tool_call>'
 

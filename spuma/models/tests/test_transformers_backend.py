@@ -5,10 +5,10 @@ import pytest
 import torch
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from spuma.conftest import TINY_CONFIG
 from spuma.models.backend import GenerationRequest, GenerationResult, ModelBackend
 from spuma.models.config import GenerationConfig, ModelConfig
 from spuma.models.engines import get_backend
+from spuma.models.tests.fixtures import TINY_CONFIG
 from spuma.models.transformers_backend import TransformersBackend
 
 GREEDY = GenerationConfig(temperature=0.0, max_new_tokens=8)

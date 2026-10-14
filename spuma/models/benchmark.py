@@ -24,10 +24,10 @@ from typing import Any
 import torch
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from spuma.artifacts import FileArtifactStore
 from spuma.common.logs import setup_logging
 from spuma.config import PROJECT_ROOT, SETTINGS_FILE_ENV, get_settings
 from spuma.dataset.registry import get_dataset
+from spuma.experiments.artifacts import FileArtifactStore
 from spuma.models.backend import GenerationRequest, ModelBackend
 from spuma.models.engines import get_backend, release_backends
 

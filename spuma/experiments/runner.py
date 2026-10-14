@@ -40,7 +40,6 @@ import numpy as np
 
 from spuma.agents.trajectory import Trajectory
 from spuma.agents.workflow import build_workflow
-from spuma.artifacts import FileArtifactStore
 from spuma.common.config import to_plain
 from spuma.common.logs import progress
 from spuma.common.utils import safe_name
@@ -49,7 +48,7 @@ from spuma.dataset.base import AnswerGrader, DatasetProvider, Problem
 from spuma.dataset.registry import get_dataset, get_grader
 from spuma.evaluation.metrics import binary_entropy, evaluate
 from spuma.evaluation.risk import risk_model_spec
-from spuma.features import extract_features, tool_metadata
+from spuma.experiments.artifacts import FileArtifactStore
 from spuma.models.backend import ModelBackend
 from spuma.models.batching import MicroBatcher
 from spuma.models.config import ModelConfig
@@ -64,6 +63,7 @@ from spuma.uncertainty.estimators import (
     score_trajectory,
     step_metric_rows,
 )
+from spuma.uncertainty.features import extract_features, tool_metadata
 
 logger = logging.getLogger(__name__)
 

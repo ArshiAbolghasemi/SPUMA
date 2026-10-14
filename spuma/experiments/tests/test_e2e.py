@@ -8,11 +8,11 @@ import re
 import pytest
 
 from spuma.common.config import to_plain
-from spuma.conftest import ALL_CAPABILITIES
 from spuma.dataset.base import Problem
 from spuma.experiments.runner import ExperimentRunner
 from spuma.models.backend import BackendInfo, GenerationResult, TokenScores, scorer_id
 from spuma.models.chat import parse_qwen_output, to_chat_dicts
+from spuma.models.tests.fixtures import ALL_CAPABILITIES
 from spuma.tools.registry import default_providers
 from spuma.tools.worker import IsolatedRunner
 

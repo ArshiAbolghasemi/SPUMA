@@ -2,9 +2,9 @@ import dataclasses
 
 import pytest
 
-from spuma.conftest import TINY_CONFIG
 from spuma.models import vllm_backend as vllm_module
 from spuma.models.tests import fake_vllm
+from spuma.models.tests.fixtures import TINY_CONFIG
 from spuma.models.vllm_backend import VLLMBackend
 
 

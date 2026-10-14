@@ -1,29 +1,20 @@
-"""Shared fixtures for every `spuma/**/tests` package.
+"""Offline model fixtures for every test (registered in pyproject: `-p spuma.models.tests.fixtures`).
 
-Offline only: a byte-level BPE tokenizer trained in-process, a tiny randomly initialised Qwen3
-causal LM (no downloads, CPU), and a scripted backend that replays fixed outputs for workflow tests.
+A byte-level BPE tokenizer trained in-process, a tiny randomly initialised Qwen3 causal LM (no downloads,
+CPU), and a scripted backend that replays fixed outputs for workflow tests.
 """
 
 import math
-import os
-import re
-import time
-import types
 from collections.abc import Sequence
-from pathlib import Path
 from typing import Any
 
 import pytest
 import torch
-import uqlm.scorers.shortform.entropy as entropy
-import yaml
 from langchain_core.messages import BaseMessage
 from tokenizers import Tokenizer, decoders, models, pre_tokenizers, trainers
 from transformers import PreTrainedTokenizerFast, Qwen3Config, Qwen3ForCausalLM
 
 from spuma.common.config import to_plain
-from spuma.config import Settings, get_settings
-from spuma.config import settings as settings_module
 from spuma.models.backend import (
     BackendCapabilities,
     BackendInfo,
@@ -36,7 +27,6 @@ from spuma.models.backend import (
 from spuma.models.chat import parse_qwen_output, to_chat_dicts
 from spuma.models.config import ModelConfig, TransformersBackendConfig
 from spuma.models.transformers_backend import TransformersBackend
-from spuma.uncertainty import estimators
 
 CORPUS = [
     "Solve for x: 2x + 3 = 7. The answer is \\boxed{2}.",
@@ -50,43 +40,6 @@ CHAT_TEMPLATE = (
     "{% for m in messages %}<|im_start|>{{ m['role'] }}\n{{ m['content'] }}<|im_end|>\n{% endfor %}"
     "{% if add_generation_prompt %}<|im_start|>assistant\n{% endif %}"
 )
-
-
-@pytest.fixture(autouse=True)
-def isolated_env(tmp_path, monkeypatch):
-    """Never read the project .env or inherit SPUMA_* / HF_TOKEN from the shell."""
-    monkeypatch.setattr(settings_module, "DEFAULT_DOTENV_FILE", tmp_path / "no.env")
-    # SPUMA_CONFIG_FILE always listed: Experiment.activate() sets it, and teardown must remove it again
-    for var in {*(v for v in os.environ if v.startswith("SPUMA_")), settings_module.SETTINGS_FILE_ENV, "HF_TOKEN"}:
-        monkeypatch.setenv(var, "")  # record the original so teardown restores it (load_dotenv writes os.environ)
-        monkeypatch.delenv(var)
-    get_settings.cache_clear()  # every test starts from a fresh load of the real config file
-    yield
-    get_settings.cache_clear()
-
-
-@pytest.fixture
-def config() -> Settings:
-    """The process-wide settings (`get_settings()`): the real config/config-qwen-math.yaml."""
-    return get_settings()
-
-
-@pytest.fixture
-def set_settings(monkeypatch):
-    """Make `get_settings()` return the given settings for this test (code reads settings, never receives them)."""
-
-    def install(settings: Settings) -> Settings:
-        monkeypatch.setattr(settings_module, "load_settings", lambda *args, **kwargs: settings)
-        get_settings.cache_clear()
-        return settings
-
-    return install
-
-
-@pytest.fixture
-def raw_config() -> dict[str, Any]:
-
-    return yaml.safe_load(Path(settings_module.DEFAULT_SETTINGS_FILE).read_text())
 
 
 TINY_CONFIG = ModelConfig(name="tiny-qwen3", dtype="float32", transformers=TransformersBackendConfig(device="cpu"))
@@ -237,68 +190,3 @@ class ScriptedBackend:
 @pytest.fixture
 def scripted_backend_cls():
     return ScriptedBackend
-
-
-HEAVY_MARKERS = ("gpu", "vllm", "nli")
-
-
-def pytest_collection_modifyitems(config, items):
-    """Model-downloading tests (gpu, vllm, nli) run only when explicitly selected: their marker is named
-    positively in `-m` (e.g. `-m nli`, `-m "gpu or vllm"`), or SPUMA_TESTS_ALL=1 (run-tests.sh --all).
-
-    Any other invocation, including a bare `pytest` or a `-m` filter that simply does not mention a
-    marker, skips them, so no test run downloads a model by accident.
-    """
-
-    if os.environ.get("SPUMA_TESTS_ALL") == "1":
-        return
-    expr = config.option.markexpr or ""
-    selected = {m for m in HEAVY_MARKERS if re.search(rf"(?<!not )\b{m}\b", expr)}
-    for item in items:
-        heavy = [m for m in HEAVY_MARKERS if m in item.keywords]
-        if heavy and not selected.intersection(heavy):
-            reason = f"downloads a model ({', '.join(heavy)}): select with -m {heavy[0]} or run-tests.sh --all"
-            item.add_marker(pytest.mark.skip(reason=reason))
-
-
-class RuleNLI:
-    """Stand-in for uqlm.nli.NLI with the same interface: "entailment" iff both texts end in the same number.
-
-    UQLM's BlackBoxUQ, clustering and entropy code run unchanged on top of it; only the DeBERTa download
-    is avoided.
-    """
-
-    def __init__(self):
-        self.num_responses = None
-        self.probabilities = {}
-        self.pairs: list[tuple[str, str]] = []
-
-    @staticmethod
-    def _final_number(text: str):
-
-        nums = re.findall(r"-?\d+(?:\.\d+)?", text)
-        return float(nums[-1]) if nums else None
-
-    def get_nli_results_batch(self, response_pairs):
-        self.pairs += list(response_pairs)
-        out = []
-        for a, b in response_pairs:
-            same = a == b or (self._final_number(a) is not None and self._final_number(a) == self._final_number(b))
-            out.append(
-                {"noncontradiction_score": 1.0 if same else 0.0, "entailment": same, "entailment_score": float(same)}
-            )
-        return out
-
-
-@pytest.fixture(autouse=True)
-def rule_nli(request, monkeypatch):
-    """Offline tests never load the real NLI model; `nli`-marked tests do."""
-    if request.node.get_closest_marker("nli"):
-        return None
-    nli = RuleNLI()
-
-    # UQLM's SemanticEntropy.score ends with a fixed time.sleep(0.1); skip it in tests only
-    monkeypatch.setattr(entropy, "time", types.SimpleNamespace(sleep=lambda s: None, time=time.time))
-    # real UQLM scorer, clustering and entropy; rule NLI instead of the model download
-    monkeypatch.setattr(estimators, "LabelOrderedNLI", lambda **kwargs: nli)
-    return nli

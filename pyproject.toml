@@ -120,6 +120,13 @@ explicit = true
 
 [tool.pytest.ini_options]
 testpaths = ["spuma"]  # tests live next to their code: spuma/<package>/tests/
+# shared fixtures live with the package they belong to (spuma/<package>/tests/fixtures.py), loaded for every test
+addopts = [
+    "-p", "spuma.common.tests.fixtures",
+    "-p", "spuma.config.tests.fixtures",
+    "-p", "spuma.models.tests.fixtures",
+    "-p", "spuma.uncertainty.tests.fixtures",
+]
 markers = [
     "vllm: needs vLLM (Linux + NVIDIA GPU) and downloads a model",
     "nli: downloads the NLI model used for semantic entropy (microsoft/deberta-large-mnli, ~1.6 GB)",
