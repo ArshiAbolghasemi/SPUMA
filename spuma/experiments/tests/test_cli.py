@@ -16,7 +16,7 @@ def test_cli_help():
         env={"PATH": "", "SPUMA_LOGGING__FILE": "false", "SPUMA_LOGGING__FORMAT": "text"},
     )
     assert out.returncode == 0, out.stderr
-    assert "--phase" in out.stdout and "--limit" in out.stdout
+    assert all(flag in out.stdout for flag in ("--experiment", "--phase", "--limit", "--list"))
 
 
 @pytest.mark.gpu

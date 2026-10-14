@@ -1,39 +1,52 @@
-"""Run the SPUMA experiment: generate -> score -> train -> evaluate (agents use their configured tools).
+"""Run SPUMA experiments: generate -> score -> train -> evaluate. Without --experiment, every registered one runs.
 
-    uv run python -m spuma.experiments                                  # every phase
-    uv run python -m spuma.experiments --phase train --phase evaluate   # from saved artifacts
-    uv run python -m spuma.experiments --limit 5                        # smoke run: 5 problems per split
+    uv run python -m spuma.experiments                                       # all experiments, every phase
+    uv run python -m spuma.experiments --experiment math                     # only MATH
+    uv run python -m spuma.experiments --phase train --phase evaluate        # from saved artifacts
+    uv run python -m spuma.experiments --experiment math --limit 5           # smoke run: 5 problems per split
+    uv run python -m spuma.experiments --list                                # registered experiments
 
+Each experiment runs with its own settings file (SPUMA_* environment overrides apply to every experiment).
 (`scripts/run-experiments.sh` wraps this and forwards the same flags.)
 """
 
 import argparse
 import logging
-import os
+import sys
 
-from spuma.common.logs import set_run_id, setup_logging
-from spuma.config import SETTINGS_FILE_ENV, get_settings
-from spuma.experiments.runner import PHASES, ExperimentRunner
+from spuma.experiments.registry import EXPERIMENTS
+from spuma.experiments.runner import PHASES
 
 logger = logging.getLogger("spuma.experiments")
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="run-experiments", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--config", help="path to the config file (default: config/config-qwen-math.yaml)")
+    parser.add_argument(
+        "--experiment", action="append", choices=sorted(EXPERIMENTS), help="run only this experiment (repeatable)"
+    )
     parser.add_argument("--phase", action="append", choices=PHASES, help="run only this phase (repeatable)")
     parser.add_argument("--limit", type=int, help="use only the first N problems of each split")
-    args = parser.parse_args()
+    parser.add_argument("--list", action="store_true", help="list the registered experiments and exit")
+    args = parser.parse_args(argv)
 
-    if args.config:
-        os.environ[SETTINGS_FILE_ENV] = args.config  # read by the first get_settings() call
-    setup_logging(get_settings().experiment.name)
-    runner = ExperimentRunner()
-    set_run_id(runner.run_id)
-    runner.run(phases=args.phase, limit=args.limit)
+    if args.list:
+        for e in EXPERIMENTS.values():
+            sys.stdout.write(f"{e.name}\t{e.config_file}\t{e.description}\n")
+        return 0
+    failed = []
+    for name in args.experiment or list(EXPERIMENTS):
+        try:
+            EXPERIMENTS[name].run(phases=args.phase, limit=args.limit)
+        except Exception:  # noqa: BLE001 - one failing experiment must not stop the others
+            logger.exception("experiment failed", extra={"experiment": name})
+            failed.append(name)
+    if failed:
+        logger.error("experiments failed", extra={"failed": failed})
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

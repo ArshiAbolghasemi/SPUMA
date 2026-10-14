@@ -56,7 +56,8 @@ CHAT_TEMPLATE = (
 def isolated_env(tmp_path, monkeypatch):
     """Never read the project .env or inherit SPUMA_* / HF_TOKEN from the shell."""
     monkeypatch.setattr(settings_module, "DEFAULT_DOTENV_FILE", tmp_path / "no.env")
-    for var in [v for v in os.environ if v.startswith("SPUMA_")] + ["HF_TOKEN"]:
+    # SPUMA_CONFIG_FILE always listed: Experiment.activate() sets it, and teardown must remove it again
+    for var in {*(v for v in os.environ if v.startswith("SPUMA_")), settings_module.SETTINGS_FILE_ENV, "HF_TOKEN"}:
         monkeypatch.setenv(var, "")  # record the original so teardown restores it (load_dotenv writes os.environ)
         monkeypatch.delenv(var)
     get_settings.cache_clear()  # every test starts from a fresh load of the real config file

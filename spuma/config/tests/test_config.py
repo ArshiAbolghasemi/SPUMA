@@ -8,6 +8,7 @@ import yaml
 
 from spuma.config import PROJECT_ROOT, SETTINGS_FILE_ENV, Settings, get_settings, load_settings
 from spuma.config.settings import _redact
+from spuma.experiments.registry import EXPERIMENTS
 
 
 def test_project_config_is_valid(config):
@@ -170,8 +171,8 @@ def test_dotenv_exported_not_in_config(tmp_path, monkeypatch):
     assert "hf_secret" not in json.dumps(config.sanitized())
 
 
-def test_only_one_yaml_file():
-
-    found = [p for p in Path(PROJECT_ROOT).rglob("*.y*ml") if ".venv" not in p.parts and "artifacts" not in p.parts]
-    assert [p.name for p in found] == ["config-qwen-math.yaml"], found
-    assert yaml.safe_load(found[0].read_text())
+def test_every_yaml_file_is_an_experiments_settings_file():
+    found = {p for p in Path(PROJECT_ROOT).rglob("*.y*ml") if ".venv" not in p.parts and "artifacts" not in p.parts}
+    assert found == {e.config_file for e in EXPERIMENTS.values()}, found
+    for path in found:
+        assert yaml.safe_load(path.read_text())
