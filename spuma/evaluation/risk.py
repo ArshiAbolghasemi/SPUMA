@@ -12,7 +12,7 @@ from typing import Any, Protocol, Self
 
 import numpy as np
 
-from spuma.spn.model import ClassConditionalSPN
+from spuma.spn.model import ClassConditionalSPN, JointSPN
 
 
 class RiskModel(Protocol):
@@ -37,10 +37,8 @@ class RiskModelSpec:
 
 
 RISK_MODELS: dict[str, RiskModelSpec] = {
-    "spn": RiskModelSpec(
-        build=ClassConditionalSPN,
-        load=ClassConditionalSPN.load,
-    ),
+    "spn": RiskModelSpec(build=JointSPN, load=JointSPN.load),
+    "spn_class_conditional": RiskModelSpec(build=ClassConditionalSPN, load=ClassConditionalSPN.load),
 }
 
 

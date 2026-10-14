@@ -172,17 +172,25 @@ features:
     - reviewer_nll
     - reviewer_length
 
+# risk model `spn`: one joint SPN over (Z, Y) with indicator leaves for Y;
+# `spn_class_conditional`: the baseline P(Y) * SPN_c(Z). Both use the settings below.
 spn:
   backend: spflow
-  model_type: class_conditional
   target: incorrect
   seed: 42
-  leaf: normal
-  min_instances_slice: 50
+  leaf: histogram          # normal | laplace | histogram (continuous feature leaves)
+  histogram:
+    bins: 10
+    strategy: uniform      # uniform | quantile (edges from the training data, per feature)
+    smoothing: 1.0         # Laplace pseudo-count per cell (bins + 2 exponential tails)
+  # LearnSPN structure learning
+  min_instances_slice: 50  # fewer rows: stop clustering, factorize into leaves
   min_features_slice: 2
-  rdc_threshold: 0.3
+  n_clusters: 2            # k-means clusters per sum node
+  rdc_threshold: 0.3       # RDC dependence threshold for product-node splits
+  keep_label_dependence: true  # joint SPN: never split a varying Y off alone (false = plain LearnSPN)
   standardize: true
-  prior_smoothing: 1.0
+  prior_smoothing: 1.0     # Laplace pseudo-count of the label (indicator leaves / class prior)
 
 evaluation:
   metrics:
@@ -196,8 +204,9 @@ evaluation:
     - nll
   ece_bins: 15
   # Error-risk models to train and evaluate (registry: spuma/evaluation/risk.py). Only the SPN for now.
-  risk_models:
+  risk_models:            # spn (joint) | spn_class_conditional (baseline)
     - spn
+    - spn_class_conditional
 
   bootstrap:
     enabled: true

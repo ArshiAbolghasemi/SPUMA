@@ -184,7 +184,9 @@ def test_full_pipeline(config, set_settings, tmp_path, runner_proc, fake_capabil
     assert summary["n"] == 30 and 0 < summary["accuracy"] < 1
     assert summary["models"]["spn"]["auroc"] > 0.9
     assert summary["models"]["spn"]["auarc"] > summary["accuracy"]
-    assert set(summary["models"]) == {"spn", "spn_posterior_entropy"}  # only the configured risk model
+    # the configured risk models: the joint SPN and the class-conditional baseline, each with its posterior entropy
+    names = {"spn", "spn_class_conditional"}
+    assert set(summary["models"]) == names | {f"{n}_posterior_entropy" for n in names}
 
     d = runner.scored_dir()
     feats = store.read_json(f"{d}/features.json")
