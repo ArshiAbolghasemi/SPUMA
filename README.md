@@ -1,11 +1,6 @@
 # SPUMA
 Probabilistic Uncertainty Estimation in Multi-Agent LLM Systems via Sum-Product Networks
 
-SPUMA runs a multi-agent LLM system (a Solver and a Reviewer agent with math tools) on a benchmark, measures
-the uncertainty of every agent step (predictive entropy, semantic entropy, NLL, length), aggregates it per
-agent into features Z, and trains a joint sum-product network over (Z, Y) that predicts whether the final
-answer is wrong: U(Z) = P(Y = wrong | Z). Results are reported as AUROC/AUARC (plus calibration metrics).
-
 ## Setup
 
 Requirements: [uv](https://docs.astral.sh/uv/), Python 3.14 (uv installs it), and for real runs an NVIDIA
