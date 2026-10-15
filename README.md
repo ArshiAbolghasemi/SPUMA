@@ -19,9 +19,9 @@ cp .env.example .env                       # then set HF_TOKEN (Hugging Face Hub
 
 Each experiment is a module in `spuma/experiments/` that names its settings file:
 
-| experiment | module | settings | what it runs |
-|---|---|---|---|
-| `math` | `spuma/experiments/math.py` | `config/config-qwen-math.yaml` | MATH, Qwen3-8B Solver -> Reviewer |
+| experiment | module | settings | dataset | splits (train / validation / test) | what it runs |
+|---|---|---|---|---|---|
+| `math` | `spuma/experiments/math.py` | `config/config-qwen-math.yaml` | [MATH](https://huggingface.co/datasets/EleutherAI/hendrycks_math) (Hendrycks et al., 2021) | 800 / 200 from official train, 500 from official test | Qwen3-8B Solver -> Reviewer |
 
 A settings file defines everything about its experiment: dataset and splits, model and backends
 (`model.backend` for generation, `model.scoring_backend` for teacher-forced scoring), agents and their
