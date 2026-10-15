@@ -222,3 +222,4 @@ __marimo__/
 # SPUMA outputs
 artifacts/
 logs/
+.DS_Store

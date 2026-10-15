@@ -45,8 +45,6 @@ mps = ["torch==2.14.1"]
 # vLLM (Linux + NVIDIA). Brings its own pinned torch (2.13.0, PyPI CUDA build), so it replaces
 # the cuXXX extras rather than combining with them: `uv sync --extra vllm`.
 vllm = ["vllm==0.31.0; sys_platform == 'linux' and platform_machine in 'x86_64 aarch64'", "torch==2.13.0"]
-# Multi-GPU / offloaded loading (model.device: auto with device_map)
-accelerate = ["accelerate>=1.10.0"]
 
 [dependency-groups]
 dev = [

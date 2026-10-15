@@ -10,7 +10,6 @@ GPU (vLLM generation needs Linux). Apple Silicon and CPU are enough for developm
 git clone <repo-url> && cd SPUMA
 scripts/install-dependencies.sh            # picks the torch build: cu126/cu128/cu130 from nvcc, mps on macOS, else cpu
 scripts/install-dependencies.sh --vllm     # Linux + NVIDIA: vLLM backend (brings its own pinned torch)
-scripts/install-dependencies.sh --accelerate   # optional: multi-GPU / offloaded model loading
 cp .env.example .env                       # then set HF_TOKEN (Hugging Face Hub access)
 ```
 

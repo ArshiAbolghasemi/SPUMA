@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Install dependencies with the torch extra that matches the local CUDA toolkit (nvcc).
 #   scripts/install-dependencies.sh                 # torch only
-#   scripts/install-dependencies.sh --accelerate    # + accelerate (multi-GPU / offloaded loading)
 #   scripts/install-dependencies.sh --vllm          # vLLM backend (Linux + NVIDIA): installs the `vllm`
 #                                                   # extra, whose pinned torch replaces the cuXXX extra
 #
@@ -11,13 +10,11 @@ cd "$(dirname "$0")/.."
 # Distro Pythons (/usr/lib/python3.x) can break torch's source introspection; use uv's own build.
 export UV_PYTHON_PREFERENCE=only-managed
 
-accelerate=0
 vllm=0
 for arg in "$@"; do
     case "$arg" in
-        --accelerate) accelerate=1 ;;
         --vllm) vllm=1 ;;
-        -h|--help) sed -n '2,8p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,7p' "$0"; exit 0 ;;
         *) echo "unknown flag: $arg" >&2; exit 2 ;;
     esac
 done
@@ -42,7 +39,6 @@ else
 fi
 
 args=(--extra "$extra")
-(( accelerate )) && args+=(--extra accelerate)
 
 echo "uv sync ${args[*]}"
 uv sync "${args[@]}"
