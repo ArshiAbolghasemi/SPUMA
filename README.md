@@ -21,7 +21,7 @@ Each experiment is a module in `spuma/experiments/` that names its settings file
 
 | experiment | module | settings | dataset | splits (train / validation / test) | what it runs |
 |---|---|---|---|---|---|
-| `math` | `spuma/experiments/math.py` | `config/config-qwen-math.yaml` | [MATH](https://huggingface.co/datasets/EleutherAI/hendrycks_math) (Hendrycks et al., 2021) | 800 / 200 from official train, 500 from official test | Qwen3-8B Solver -> Reviewer |
+| `[math](docs/experiment/math_ma_qwen3_8b.md)` | `spuma/experiments/math.py` | `config/config-qwen-math.yaml` | [MATH](https://huggingface.co/datasets/EleutherAI/hendrycks_math) (Hendrycks et al., 2021) | 800 / 200 from official train, 500 from official test | Qwen3-8B Solver -> Reviewer |
 
 A settings file defines everything about its experiment: dataset and splits, model and backends
 (`model.backend` for generation, `model.scoring_backend` for teacher-forced scoring), agents and their
@@ -30,8 +30,6 @@ can be overridden from the environment with the `SPUMA_` prefix and `__` for nes
 `SPUMA_MODEL__BACKEND=transformers` or `SPUMA_DATASET__TEST_SAMPLES=50`.
 
 ### Running
-
-See the [MATH Solver–Reviewer experiment](docs/experiment/math_ma_qwen3_8b.md) for its setup, methodology, and results.
 
 ```bash
 scripts/run-experiments.sh                                  # every registered experiment, every phase
