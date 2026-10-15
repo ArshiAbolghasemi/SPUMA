@@ -206,7 +206,9 @@ either agent's context.
 
 ### Figure 2: Semantic entropy by generation step
 
-[Semantic entropy cumulative distributions for steps 1 through 8 (PDF)](assets/math_ma_qwen3_8b/steps_se.pdf)
+<object data="assets/math_ma_qwen3_8b/steps_se.pdf" type="application/pdf" width="100%" height="520">
+  <a href="assets/math_ma_qwen3_8b/steps_se.pdf">Semantic entropy cumulative distributions for steps 1 through 8 (PDF)</a>
+</object>
 
 Each panel represents one generation position, from step 1 to step 8. Its horizontal
 axis is SE and its vertical axis is the cumulative fraction within that agent and
@@ -222,7 +224,9 @@ reduce uncertainty on the same problems. Zero SE can also occur for incorrect an
 
 ### Figure 3: Predictive entropy by generation step
 
-[Predictive entropy cumulative distributions for steps 1 through 8 (PDF)](assets/math_ma_qwen3_8b/steps_pe.pdf)
+<object data="assets/math_ma_qwen3_8b/steps_pe.pdf" type="application/pdf" width="100%" height="520">
+  <a href="assets/math_ma_qwen3_8b/steps_pe.pdf">Predictive entropy cumulative distributions for steps 1 through 8 (PDF)</a>
+</object>
 
 Panels again correspond to generation positions. The horizontal axis is mean
 full-vocabulary next-token entropy along the actual continuation; the vertical axis
@@ -236,7 +240,9 @@ so the panels do not track a fixed cohort improving over time.
 
 ### Figure 4: Token NLL by generation step
 
-[Token negative log-likelihood cumulative distributions for steps 1 through 8 (PDF)](assets/math_ma_qwen3_8b/steps_nll.pdf)
+<object data="assets/math_ma_qwen3_8b/steps_nll.pdf" type="application/pdf" width="100%" height="520">
+  <a href="assets/math_ma_qwen3_8b/steps_nll.pdf">Token negative log-likelihood cumulative distributions for steps 1 through 8 (PDF)</a>
+</object>
 
 The horizontal axis is the average negative log probability of the actual generated
 tokens, and the vertical axis is the cumulative fraction. Larger values mean that
@@ -249,7 +255,9 @@ absent curve means no observations.
 
 ### Figure 5: All observed steps pooled
 
-[Within-role histograms of semantic entropy, predictive entropy, and token NLL (PDF)](assets/math_ma_qwen3_8b/pooled_steps.pdf)
+<object data="assets/math_ma_qwen3_8b/pooled_steps.pdf" type="application/pdf" width="100%" height="520">
+  <a href="assets/math_ma_qwen3_8b/pooled_steps.pdf">Within-role histograms of semantic entropy, predictive entropy, and token NLL (PDF)</a>
+</object>
 
 The three panels show SE, PE, and token NLL after pooling every observed test step
 within each role. The horizontal axes contain score intervals; the vertical axis
@@ -264,7 +272,9 @@ metric; numerical magnitudes across different metrics have different meanings.
 
 ### Figure 6: Final steps versus all-step RMS
 
-[Final-step and all-step RMS cumulative distributions for both agents (PDF)](assets/math_ma_qwen3_8b/completed_trajectories.pdf)
+<object data="assets/math_ma_qwen3_8b/completed_trajectories.pdf" type="application/pdf" width="100%" height="520">
+  <a href="assets/math_ma_qwen3_8b/completed_trajectories.pdf">Final-step and all-step RMS cumulative distributions for both agents (PDF)</a>
+</object>
 
 Columns show SE, PE, and token NLL. The top row uses each agent's last generated
 step; the bottom row uses RMS across all of its steps. Both rows give each test
@@ -282,7 +292,9 @@ stopped by a budget limit, rather than a completed answer.
 
 ### Figure 7: Uncertainty by final-answer correctness
 
-[RMS uncertainty cumulative distributions grouped by final-answer correctness (PDF)](assets/math_ma_qwen3_8b/outcomes.pdf)
+<object data="assets/math_ma_qwen3_8b/outcomes.pdf" type="application/pdf" width="100%" height="520">
+  <a href="assets/math_ma_qwen3_8b/outcomes.pdf">RMS uncertainty cumulative distributions grouped by final-answer correctness (PDF)</a>
+</object>
 
 Rows show Solver and Reviewer; columns show SE, PE, and token NLL. Green solid
 curves represent correct final Reviewer answers and red dashed curves represent
