@@ -75,16 +75,6 @@ With vLLM generation and Transformers scoring, the runner releases the vLLM engi
 one Qwen3-8B engine is on the GPU at a time. If GPU memory is not fully freed on a single 24 GB GPU, run
 the two as separate invocations: `--phase generate`, then `--phase score --phase train --phase evaluate`.
 
-### Adding an experiment
-
-1. Copy `config/config-qwen-math.yaml` to e.g. `config/config-llama-gsm8k.yaml` and set `experiment.name`,
-   `dataset:`, `model:` and the agents.
-2. Add `spuma/experiments/gsm8k.py` with
-   `EXPERIMENT = Experiment(name="gsm8k", config_file=PROJECT_ROOT / "config" / "config-llama-gsm8k.yaml")`
-   and list it in `spuma/experiments/registry.py`.
-3. A new dataset also needs a loader and grader in `spuma/dataset/<name>/`, an entry in
-   `spuma/dataset/registry.py`, and its name in the allowed `dataset.name` values (`spuma/dataset/config.py`).
-
 ### Backend benchmark
 
 ```bash
