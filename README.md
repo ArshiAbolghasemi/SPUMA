@@ -31,6 +31,8 @@ can be overridden from the environment with the `SPUMA_` prefix and `__` for nes
 
 ### Running
 
+See the [MATH Solver–Reviewer experiment](docs/experiment/math_ma_qwen3_8b.md) for its setup, methodology, and results.
+
 ```bash
 scripts/run-experiments.sh                                  # every registered experiment, every phase
 scripts/run-experiments.sh --experiment math                # one experiment (flag is repeatable)
