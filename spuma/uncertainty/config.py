@@ -4,20 +4,7 @@ from dataclasses import dataclass, field
 
 from spuma.common.config import check_choice, check_range
 
-METRICS = ("pe", "se", "nll", "length")
-SAMPLING_FIELDS = ("enabled", "n", "temperature", "top_p", "top_k", "max_new_tokens")
-
-
-@dataclass(frozen=True)
-class PredictiveEntropyConfig:
-    enabled: bool = True
-    full_vocabulary: bool = True
-    distribution: str = "raw_model"
-
-    def __post_init__(self) -> None:
-        if self.full_vocabulary is not True:
-            raise ValueError("uncertainty.predictive_entropy.full_vocabulary must be true (no top-k approximation)")
-        check_choice("uncertainty.predictive_entropy.distribution", self.distribution, ("raw_model",))
+METRICS = ("mcsp", "se", "sd", "length")
 
 
 @dataclass(frozen=True)
@@ -58,9 +45,53 @@ class SemanticEntropyConfig:
 
 
 @dataclass(frozen=True)
-class NLLConfig:
+class MonteCarloConfig:
+    """`uncertainty.monte_carlo`: the samples drawn from each step's frozen context for MCSP and SD.
+
+    Every sample has its own seed, derived from (project.seed, problem, run, agent, round, sample index).
+    `length_normalize` sets the sequence probability the UQLM scorers use: exp(mean_t log p(y_t)) when true,
+    prod_t p(y_t) when false (raw model distribution).
+    """
+
+    num_generations: int = 10
+    temperature: float = 0.7
+    top_p: float = 1.0
+    top_k: int | None = None
+    max_new_tokens: int | None = None
+    length_normalize: bool = True
+
+    def __post_init__(self) -> None:
+        key = "uncertainty.monte_carlo"
+        check_range(f"{key}.num_generations", self.num_generations, ge=2)
+        check_range(f"{key}.temperature", self.temperature, gt=0.0)
+        check_range(f"{key}.top_p", self.top_p, gt=0.0, le=1.0)
+        check_range(f"{key}.top_k", self.top_k, gt=0)
+        check_range(f"{key}.max_new_tokens", self.max_new_tokens, gt=0)
+
+
+@dataclass(frozen=True)
+class MonteCarloSequenceProbabilityConfig:
+    """UQLM white-box `monte_carlo_probability`."""
+
     enabled: bool = True
-    normalize_by_length: bool = True
+
+
+@dataclass(frozen=True)
+class SemanticDensityConfig:
+    """UQLM white-box `semantic_density` (Qiu et al., 2024); the NLI model scores response/sample pairs."""
+
+    enabled: bool = True
+    nli_model_name: str = "tasksource/ModernBERT-large-nli"
+    nli_max_length: int = 8000
+    nli_max_tokens: int | None = 2048
+    nli_batch_size: int = 32
+    nli_device: str | None = None
+
+    def __post_init__(self) -> None:
+        key = "uncertainty.semantic_density"
+        check_range(f"{key}.nli_max_length", self.nli_max_length, gt=0)
+        check_range(f"{key}.nli_max_tokens", self.nli_max_tokens, gt=0)
+        check_range(f"{key}.nli_batch_size", self.nli_batch_size, gt=0)
 
 
 @dataclass(frozen=True)
@@ -72,16 +103,40 @@ class TokenLengthConfig:
 class UncertaintyConfig:
     """`uncertainty:` section."""
 
-    predictive_entropy: PredictiveEntropyConfig = field(default_factory=PredictiveEntropyConfig)
     semantic_entropy: SemanticEntropyConfig = field(default_factory=SemanticEntropyConfig)
-    nll: NLLConfig = field(default_factory=NLLConfig)
+    monte_carlo: MonteCarloConfig = field(default_factory=MonteCarloConfig)
+    monte_carlo_sequence_probability: MonteCarloSequenceProbabilityConfig = field(
+        default_factory=MonteCarloSequenceProbabilityConfig
+    )
+    semantic_density: SemanticDensityConfig = field(default_factory=SemanticDensityConfig)
     token_length: TokenLengthConfig = field(default_factory=TokenLengthConfig)
+
+    def __post_init__(self) -> None:
+        se, mc = self.semantic_entropy, self.monte_carlo
+        if se.enabled:
+            shared = {"n": "num_generations", "temperature": "temperature", "top_p": "top_p", "top_k": "top_k"}
+            shared["max_new_tokens"] = "max_new_tokens"
+            for se_key, mc_key in shared.items():
+                if getattr(se, se_key) != getattr(mc, mc_key):
+                    raise ValueError(
+                        f"uncertainty.semantic_entropy.{se_key} must equal uncertainty.monte_carlo.{mc_key}: "
+                        "SE is computed on the shared Monte Carlo samples"
+                    )
+
+    @property
+    def monte_carlo_enabled(self) -> bool:
+        """The shared Monte Carlo samples (with token log-probs) are needed (MCSP, SE or SD)."""
+        return (
+            self.monte_carlo_sequence_probability.enabled
+            or self.semantic_entropy.enabled
+            or self.semantic_density.enabled
+        )
 
     def enabled_metrics(self) -> list[str]:
         flags = {
-            "pe": self.predictive_entropy.enabled,
+            "mcsp": self.monte_carlo_sequence_probability.enabled,
             "se": self.semantic_entropy.enabled,
-            "nll": self.nll.enabled,
+            "sd": self.semantic_density.enabled,
             "length": self.token_length.enabled,
         }
         return [m for m in METRICS if flags[m]]
@@ -91,16 +146,16 @@ class UncertaintyConfig:
 class AggregationConfig:
     """`aggregation:` section: per-metric strategy over an agent's steps."""
 
-    predictive_entropy: str = "rms"
+    monte_carlo_sequence_probability: str = "rms"
     semantic_entropy: str = "rms"
-    nll: str = "rms"
+    semantic_density: str = "rms"
     token_length: str = "mean"
 
     def for_metric(self, metric: str) -> str:
         return {
-            "pe": self.predictive_entropy,
+            "mcsp": self.monte_carlo_sequence_probability,
             "se": self.semantic_entropy,
-            "nll": self.nll,
+            "sd": self.semantic_density,
             "length": self.token_length,
         }[metric]
 

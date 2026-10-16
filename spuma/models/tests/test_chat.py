@@ -10,13 +10,14 @@ def test_parse_reasoning_and_content():
     assert parse_qwen_output("no thinking").reasoning == ""
 
 
-def test_to_chat_dicts_system_and_user_only():
-    assert to_chat_dicts([SystemMessage("s"), HumanMessage("u")]) == [
+def test_to_chat_dicts_roles():
+    assert to_chat_dicts([SystemMessage("s"), HumanMessage("u"), AIMessage("a")]) == [
         {"role": "system", "content": "s"},
         {"role": "user", "content": "u"},
+        {"role": "assistant", "content": "a"},
     ]
     with pytest.raises(TypeError):
-        to_chat_dicts([AIMessage("a")])
+        to_chat_dicts([object()])
 
 
 def test_formatter_roundtrip(tokenizer):

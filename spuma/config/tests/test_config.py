@@ -12,11 +12,22 @@ from spuma.experiments.registry import EXPERIMENTS
 
 
 def test_project_config_is_valid(config):
-    assert [a.id for a in config.agents.enabled] == ["solver", "reviewer"]
+    assert [a.id for a in config.agents.enabled] == ["mathematician", "enthusiast"]
     assert config.model.name == "Qwen/Qwen2.5-7B-Instruct"
     assert config.uncertainty.semantic_entropy.n == 10
     assert config.uncertainty.semantic_entropy.top_k is None
+    assert config.uncertainty.enabled_metrics() == ["mcsp", "se", "sd", "length"]
     assert len(config.features.order) == 8
+    assert config.model.scoring_backend == "same"
+    agents = config.agents
+    assert (agents.workflow, agents.num_runs, agents.max_rounds, agents.completion_token) == (
+        "feedback",
+        10,
+        10,
+        "TASK_DONE",
+    )
+    mc = config.uncertainty.monte_carlo
+    assert mc.num_generations == 10 and mc.length_normalize
 
 
 def test_env_override(monkeypatch, tmp_path):
@@ -48,19 +59,55 @@ def test_backend_selection_validated(raw_config):
         Settings.from_dict(raw_config)
 
 
-def test_cache_fingerprints_split_generation_and_scoring(config):
-    hybrid = dataclasses.replace(
-        config, model=dataclasses.replace(config.model, **{"backend": "vllm", "scoring_backend": "transformers"})
-    )
-    vllm_only = dataclasses.replace(
-        config, model=dataclasses.replace(config.model, backend="vllm", scoring_backend="same")
-    )
-    assert hybrid.generation_fingerprint() != vllm_only.generation_fingerprint()
-    assert hybrid.scoring_fingerprint() != vllm_only.scoring_fingerprint()
-    chunked = dataclasses.replace(hybrid.model.transformers, **{"scoring_chunk_size": 64})
-    tweaked = dataclasses.replace(hybrid, model=dataclasses.replace(hybrid.model, **{"transformers": chunked}))
-    assert tweaked.generation_fingerprint() == hybrid.generation_fingerprint()
-    assert tweaked.scoring_fingerprint() != hybrid.scoring_fingerprint()
+def test_cache_fingerprints_split_generation_and_features(config):
+    """Uncertainty is measured while generating, so its settings key the generation cache; aggregation and
+    feature settings only key the feature step."""
+    uq = config.uncertainty
+    for section, fields in (
+        ("monte_carlo", {"length_normalize": False}),
+        ("semantic_density", {"nli_model_name": "other/nli"}),
+        ("semantic_entropy", {"nli_model_name": "other/nli"}),
+    ):
+        other = dataclasses.replace(
+            config,
+            uncertainty=dataclasses.replace(uq, **{section: dataclasses.replace(getattr(uq, section), **fields)}),
+        )
+        assert other.generation_fingerprint() != config.generation_fingerprint()
+    more_runs = dataclasses.replace(config, agents=dataclasses.replace(config.agents, num_runs=3))
+    assert more_runs.generation_fingerprint() != config.generation_fingerprint()
+    rms = dataclasses.replace(config, aggregation=dataclasses.replace(config.aggregation, token_length="rms"))
+    assert rms.generation_fingerprint() == config.generation_fingerprint()
+    assert rms.scoring_fingerprint() != config.scoring_fingerprint()
+
+
+def test_semantic_entropy_must_match_the_shared_samples(raw_config):
+    raw_config["uncertainty"]["monte_carlo"]["num_generations"] = 5
+    with pytest.raises(ValueError, match="semantic_entropy.n must equal uncertainty.monte_carlo.num_generations"):
+        Settings.from_dict(raw_config)
+    raw_config["uncertainty"]["semantic_entropy"]["n"] = 5
+    assert Settings.from_dict(raw_config).uncertainty.monte_carlo.num_generations == 5
+
+
+def test_feedback_workflow_settings_are_validated(raw_config):
+    for key, value, match in (
+        ("max_rounds", 0, "max_rounds"),
+        ("num_runs", 0, "num_runs"),
+        ("completion_token", " ", "completion_token"),
+    ):
+        bad = {**raw_config, "agents": {**raw_config["agents"], key: value}}
+        with pytest.raises(ValueError, match=match):
+            Settings.from_dict(bad)
+    raw_config["agents"]["items"][1]["enabled"] = False
+    with pytest.raises(ValueError, match="exactly 2"):
+        Settings.from_dict(raw_config)
+
+
+def test_removed_uncertainty_sections_rejected(raw_config):
+    for removed in ("predictive_entropy", "nll"):
+        raw_config["uncertainty"][removed] = {"enabled": True}
+        with pytest.raises(ValueError, match=removed):
+            Settings.from_dict(raw_config)
+        del raw_config["uncertainty"][removed]
 
 
 def test_dynaconf_nested_env_override_is_typed(monkeypatch):
@@ -127,13 +174,6 @@ def test_semantic_entropy_is_uqlm_only(raw_config, config):
         raw_config["uncertainty"]["semantic_entropy"]["backend"] = removed
         with pytest.raises((ValueError, TypeError)):
             Settings.from_dict(raw_config)
-
-
-def test_changing_nli_model_keeps_generation_cache(config):
-    se = dataclasses.replace(config.uncertainty.semantic_entropy, **{"nli_model_name": "other/nli"})
-    other = dataclasses.replace(config, uncertainty=dataclasses.replace(config.uncertainty, **{"semantic_entropy": se}))
-    assert other.generation_fingerprint() == config.generation_fingerprint()
-    assert other.scoring_fingerprint() != config.scoring_fingerprint()
 
 
 def test_unknown_model_reference(raw_config):

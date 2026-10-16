@@ -14,6 +14,8 @@ class StepRecord(BaseModel):
     problem_id: str
     agent_id: str
     step_id: int
+    run_id: int = 0
+    round: int = 1
     input_messages: list[dict[str, Any]]
     prompt_ids: list[int]
     generation_params: dict[str, Any]
@@ -43,6 +45,11 @@ class Trajectory(BaseModel):
     problem: str
     agents: list[AgentTrace]
     final_answer_text: str
+    run_id: int = 0
+    rounds: int = 1
+    termination_reason: str = "final_message"
+    error: str | None = None
+    messages: list[dict[str, Any]] = Field(default_factory=list)
 
     def agent(self, agent_id: str) -> AgentTrace:
         return next(a for a in self.agents if a.agent_id == agent_id)

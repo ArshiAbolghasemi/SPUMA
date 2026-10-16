@@ -4,34 +4,38 @@ import types
 
 import numpy as np
 import pytest
-from langchain_core.messages import HumanMessage
 from uqlm.nli.nli import NLI
 
 from spuma.agents.trajectory import AgentTrace, StepRecord, Trajectory
-from spuma.models.backend import BackendCapabilities, BackendCapabilityError, GenerationRequest, scorer_id
-from spuma.models.config import GenerationConfig, ModelConfig
+from spuma.config import get_settings
+from spuma.models.backend import BackendCapabilities, BackendCapabilityError
 from spuma.uncertainty.aggregation import aggregate_agent, mean, rms
 from spuma.uncertainty.equivalence import AnswerAwareNLI
 from spuma.uncertainty.estimators import (
+    MC_SAMPLES_KEY,
     LabelOrderedNLI,
     MissingScoresError,
-    NegativeLogLikelihood,
-    PredictiveEntropy,
+    MonteCarloSampler,
+    MonteCarloSequenceProbability,
+    SemanticDensity,
     SemanticEntropy,
     SemanticSampler,
+    StepUncertainty,
     TokenLength,
-    TokenScorer,
-    build_estimators,
-    build_token_scorers,
-    score_trajectory,
+    build_view,
+    monte_carlo_seeds,
+    semantic_seeds,
     step_metric_rows,
 )
 from spuma.uncertainty.features import extract_features
 
+LPS = (-0.1, -0.2, -0.3, -0.4)
+
+
 UNBOXED = "Let me check whether x = 2"
 
 
-def _step(agent="solver", step_id=0, ids=(1, 2, 3, 4), lps=(-0.1, -0.2, -0.3, -0.4), ents=(1.0, 2.0, 3.0, 4.0), **kw):
+def _step(agent="solver", step_id=0, ids=(1, 2, 3, 4), lps=LPS, ents=(1.0, 2.0, 3.0, 4.0), text="t", **kw):
     return StepRecord(
         problem_id="p1",
         agent_id=agent,
@@ -41,41 +45,11 @@ def _step(agent="solver", step_id=0, ids=(1, 2, 3, 4), lps=(-0.1, -0.2, -0.3, -0
         generation_params={"max_new_tokens": 16},
         seed=0,
         token_ids=list(ids),
-        text="t",
+        text=text,
         token_logprobs=list(lps) if lps is not None else None,
         token_entropies=list(ents) if ents is not None else None,
         **kw,
     )
-
-
-def test_pe_nll_length_known_values(with_uq):
-    s = _step()
-    assert PredictiveEntropy().estimate(s)[0] == pytest.approx(2.5)
-    assert NegativeLogLikelihood().estimate(s)[0] == pytest.approx(0.25)
-    with_uq("nll", normalize_by_length=False)
-    assert NegativeLogLikelihood().estimate(s)[0] == pytest.approx(1.0)
-    assert TokenLength().estimate(s)[0] == 4
-
-
-def test_missing_scores_raise_instead_of_fabricating():
-    with pytest.raises(MissingScoresError):
-        PredictiveEntropy().estimate(_step(ents=None))
-    with pytest.raises(MissingScoresError):
-        NegativeLogLikelihood().estimate(_step(lps=None))
-    with pytest.raises(MissingScoresError):
-        TokenLength().estimate(_step(ids=(), lps=(), ents=()))
-
-
-def test_real_backend_pe_nll_alignment(tiny_backend):
-
-    prompt = tiny_backend.render([HumanMessage("Solve for x")])
-    request = GenerationRequest(prompt, GenerationConfig(temperature=0.7, max_new_tokens=6), seed=3, logprobs="full")
-    (g,) = tiny_backend.generate(request)
-    s = _step(ids=g.token_ids, lps=g.token_logprobs, ents=g.token_entropies)
-    scores = tiny_backend.score(prompt, g.token_ids, full_vocabulary=True)
-    lps, ents = scores.token_logprobs, scores.token_entropies
-    assert PredictiveEntropy().estimate(s)[0] == pytest.approx(sum(ents) / len(ents))
-    assert NegativeLogLikelihood().estimate(s)[0] == pytest.approx(-sum(lps) / len(lps))
 
 
 @pytest.fixture
@@ -106,24 +80,37 @@ def test_semantic_entropy_uses_uqlm_on_step_text_plus_samples(scripted_backend_c
     assert value == pytest.approx(-sum(x * math.log(x) for x in p))
     assert details["semantic_negentropy"] == pytest.approx(1 - value / math.log(11))
     assert ("t", "\\boxed{2}") in rule_nli.pairs
-    (call,) = backend.calls
-    assert call.n == 10 and call.prompt_ids == step.prompt_ids and call.params.top_k is None
-    assert call.logprobs == "none"
+    calls = backend.calls
+    assert len(calls) == 10 and all(c.n == 1 and c.prompt_ids == step.prompt_ids for c in calls)
+    assert all(c.params.top_k is None and c.logprobs == "none" for c in calls)
     stored = step.uq_details["se_samples"]
-    assert stored["policy"]["nli_model"]
+    assert stored["seeds"] == [c.seed for c in calls] == semantic_seeds(step) and len(set(stored["seeds"])) == 10
+    assert stored["policy"]["nli_model"] and stored["texts"] == samples
     assert step.token_ids == [1, 2, 3, 4] and step.text == "t"
 
 
-def test_semantic_samples_are_cached_and_batched(scripted_backend_cls, with_uq):
+def test_semantic_samples_are_cached_and_batched(scripted_backend_cls, set_settings):
     backend = scripted_backend_cls([], samples={"": ["\\boxed{4}"] * 10})
     sampler = SemanticSampler(backend)
     steps = [_step(step_id=0), _step(step_id=1)]
     sampler.sample_steps(steps)
     sampler.sample_steps(steps)
-    assert len(backend.calls) == 2 and not any(sampler.needs_samples(s) for s in steps)
+    assert len(backend.calls) == 20 and not any(sampler.needs_samples(s) for s in steps)
+    seeds = [s.uq_details["se_samples"]["seeds"] for s in steps]
+    assert not set(seeds[0]) & set(seeds[1]) and seeds[0] == semantic_seeds(steps[0])
     expected = -(1 / 11 * math.log(1 / 11) + 10 / 11 * math.log(10 / 11))
     assert SemanticEntropy().estimate(steps[0])[0] == pytest.approx(expected)
-    with_uq("semantic_entropy", temperature=1.0)
+    uq = get_settings().uncertainty
+    set_settings(
+        dataclasses.replace(
+            get_settings(),
+            uncertainty=dataclasses.replace(
+                uq,
+                semantic_entropy=dataclasses.replace(uq.semantic_entropy, temperature=1.0),
+                monte_carlo=dataclasses.replace(uq.monte_carlo, temperature=1.0),
+            ),
+        )
+    )
     assert SemanticSampler(backend).needs_samples(steps[0])
 
 
@@ -133,30 +120,118 @@ def test_semantic_entropy_from_fixed_texts_is_backend_independent():
     assert value == pytest.approx(0.0) and details["semantic_negentropy"] == pytest.approx(1.0)
 
 
-def test_trajectory_scored_in_one_uqlm_call(config, scripted_backend_cls, monkeypatch):
-    backend = scripted_backend_cls([], samples={"": ["\\boxed{1}"] * 10})
-    traj = _trajectory()
-    sampler = SemanticSampler(backend)
-    for a in traj.agents:
-        for s in a.steps:
-            s.metrics, s.scored_by = {}, backend.scorer_id
-        sampler.sample_steps(a.steps)
-    ests = build_estimators()
-    se = next(e for e in ests["solver"] if e.name == "se")
-    calls = []
-    real = se.uq.score
-    monkeypatch.setattr(se.uq, "score", lambda **kw: calls.append(len(kw["responses"])) or real(**kw))
-    score_trajectory(traj, ests, build_token_scorers(lambda m, k: pytest.fail("scored")))
-    assert calls == [3]
+def test_length_known_value_and_missing_tokens_raise():
+    assert TokenLength().estimate(_step())[0] == 4
+    with pytest.raises(MissingScoresError):
+        TokenLength().estimate(_step(ids=(), lps=(), ents=()))
 
 
-def test_one_nli_model_shared_by_agents(config, monkeypatch):
+# --- Monte Carlo samples, MCSP and SD (UQLM white-box) -------------------------------------------------------
+
+
+def _mc_sampled(backend, step=None):
+    """A step with raw token log-probs and its Monte Carlo samples (log-probs at generation)."""
+    step = step or _step(scored_by=backend.scorer_id)
+    MonteCarloSampler(backend).sample_steps([step])
+    return step
+
+
+def _seq_prob(lps, normalize=True):
+    return math.exp(sum(lps) / len(lps)) if normalize else math.exp(sum(lps))
+
+
+def test_monte_carlo_samples_have_their_own_deterministic_seeds(scripted_backend_cls):
+    backend = scripted_backend_cls([], samples={"": ["\\boxed{2}"] * 10})
+    step = _mc_sampled(backend)
+    calls = backend.calls
+    assert len(calls) == 10 and all(
+        c.n == 1 and c.prompt_ids == step.prompt_ids and c.logprobs == "token" for c in calls
+    )
+    stored = step.uq_details[MC_SAMPLES_KEY]
+    assert stored["seeds"] == [c.seed for c in calls] == monte_carlo_seeds(step) and len(set(stored["seeds"])) == 10
+    assert stored["token_logprobs"][0] == [-0.5] * len("\\boxed{2}") and stored["scored_by"] == backend.scorer_id
+    other_run, other_round = _step(run_id=1), _step(round=2)
+    assert not set(monte_carlo_seeds(other_run)) & set(stored["seeds"])
+    assert not set(monte_carlo_seeds(other_round)) & set(stored["seeds"])
+    assert step.text == "t" and step.token_ids == [1, 2, 3, 4]
+
+
+def test_monte_carlo_sampler_requires_token_logprobs():
+    caps = BackendCapabilities(multiple_completions=True, batch_generation=True)
+    with pytest.raises(BackendCapabilityError):
+        MonteCarloSampler(type("B", (), {"name": "b", "capabilities": caps})())
+
+
+@pytest.mark.parametrize("normalize", [True, False])
+def test_mcsp_is_uqlm_white_box_mean_sequence_probability(scripted_backend_cls, with_uq, normalize):
+    with_uq("monte_carlo", length_normalize=normalize)
+    samples = ["\\boxed{2}"] * 6 + ["\\boxed{13}"] * 4
+    backend = scripted_backend_cls([], samples={"": samples})
+    view = build_view(_mc_sampled(backend), backend, None)
+    value, details = MonteCarloSequenceProbability().score(view, "q")
+    probs = [_seq_prob(LPS, normalize)] + [_seq_prob([-0.5] * len(t), normalize) for t in samples]
+    assert value == pytest.approx(sum(probs) / len(probs)) and 0 < value <= 1
+    assert details == {"uqlm_scorer": "monte_carlo_probability", "length_normalize": normalize}
+
+
+def test_sd_is_uqlm_white_box_kernel_weighted_by_sample_probabilities(scripted_backend_cls, rule_nli):
+    samples = ["\\boxed{2}"] * 6 + ["\\boxed{3}"] * 4
+    backend = scripted_backend_cls([], samples={"": samples})
+    step = _mc_sampled(backend, _step(text="x = 2", scored_by=backend.scorer_id))
+    step.uq_details[MC_SAMPLES_KEY]["token_logprobs"] = [
+        [-0.1] * len(t) if "2" in t else [-2.0] * len(t) for t in samples
+    ]
+    value, details = SemanticDensity().score(build_view(step, backend, None), "What is 1+1?")
+    w_same, w_diff = 6 * math.exp(-0.1), 4 * math.exp(-2.0)
+    assert value == pytest.approx(w_same / (w_same + w_diff)) and 0 <= value <= 1
+    assert ("What is 1+1?\nx = 2", "What is 1+1?\n\\boxed{2}") in rule_nli.pairs
+    assert details["uqlm_scorer"] == "semantic_density" and details["nli_prompt"] == "problem"
+
+
+def test_view_strips_completion_marker_and_teacher_forces_the_rest(scripted_backend_cls):
+    backend = scripted_backend_cls([], samples={"": ["Fine. TASK_DONE"] * 5 + ["Why?"] * 5}, logprob=-0.3)
+    step = _mc_sampled(backend, _step(text="Looks right. TASK_DONE", scored_by=backend.scorer_id))
+    view = build_view(step, backend, "TASK_DONE")
+    assert view.text == "Looks right." and view.length == len("Looks right.") and view.rescored == 6
+    assert view.token_logprobs == [-0.3] * len("Looks right.")
+    assert backend.score_calls[0] == ([9, 9], [ord(c) for c in "Looks right."], False)
+    assert view.mc_texts[:5] == ["Fine."] * 5 and view.mc_texts[5] == "Why?"
+    assert step.text == "Looks right. TASK_DONE"
+    untouched = build_view(_mc_sampled(backend, _step(text="Why?", scored_by=backend.scorer_id)), backend, "TASK_DONE")
+    assert untouched.token_logprobs == list(LPS) and untouched.length == 4
+    only = build_view(_mc_sampled(backend, _step(text="TASK_DONE", scored_by=backend.scorer_id)), backend, "TASK_DONE")
+    assert only.text == "TASK_DONE" and only.token_logprobs == list(LPS) and only.marker_only == 1
+
+
+def test_view_requires_response_logprobs(scripted_backend_cls):
+    with pytest.raises(MissingScoresError, match="log-probabilities"):
+        build_view(_step(lps=None), scripted_backend_cls([]), None)
+
+
+def test_step_uncertainty_measures_four_metrics_with_scorers_on_the_main_thread(scripted_backend_cls, rule_nli):
+    backend = scripted_backend_cls([], samples={"": ["\\boxed{2}"] * 10})
+    served = []
+    uq = StepUncertainty(lambda agent: backend, lambda fn, *a: served.append(fn.__name__) or fn(*a))
+    step = _step(text="so \\boxed{2}", scored_by=backend.scorer_id)
+    result = uq.measure(step, "What is 1+1?")
+    assert list(result["metrics"]) == ["mcsp", "se", "sd", "length"] and served == ["_scores"]
+    assert result["metrics"]["se"] == pytest.approx(0.0) and result["metrics"]["sd"] == pytest.approx(1.0)
+    assert 0 < result["metrics"]["mcsp"] <= 1 and result["metrics"]["length"] == 4
+    assert {"mcsp", "se", "sd", "view"} <= set(result["details"])
+    assert "se_samples" not in step.uq_details and len(step.uq_details[MC_SAMPLES_KEY]["texts"]) == 10
+    assert len(backend.calls) == 10  # one shared set of 10 seeded samples for MCSP, SE and SD
+    assert step.metrics == {}
+
+
+def test_one_semantic_entropy_and_density_scorer_per_measurement_engine(config, monkeypatch, scripted_backend_cls):
     loads = []
-    monkeypatch.setattr("spuma.uncertainty.estimators.load_uqlm_semantic_entropy", lambda: loads.append(1) or object())
-    ests = build_estimators()
-    se = [e for e in ests["solver"] if e.name == "se"][0]
-    assert se is [e for e in ests["reviewer"] if e.name == "se"][0] and loads == []
-    assert se.uq is se.uq and len(loads) == 1
+    monkeypatch.setattr(
+        "spuma.uncertainty.estimators.load_uqlm_semantic_entropy", lambda: loads.append("se") or object()
+    )
+    monkeypatch.setattr("spuma.uncertainty.estimators.load_density_nli", lambda: loads.append("sd") or object())
+    uq = StepUncertainty(lambda agent: scripted_backend_cls([]))
+    assert loads == []
+    assert uq.se.uq is uq.se.uq and loads == ["se"]
 
 
 @pytest.mark.nli
@@ -185,41 +260,26 @@ def test_sampler_requires_multiple_completions():
 
 def test_semantic_entropy_rejects_short_sample_list(scripted_backend_cls):
     backend = scripted_backend_cls([], samples={"": ["\\boxed{1}"] * 3})
+    real = backend.generate_batch
+    backend.generate_batch = lambda requests: [[] if i == 9 else r for i, r in enumerate(real(requests))]
     with pytest.raises(MissingScoresError):
         _sampled(backend)
 
 
-def test_token_scorer_skips_steps_scored_by_same_engine(scripted_backend_cls):
-    backend = scripted_backend_cls([])
-    step = _step(scored_by=backend.scorer_id)
-    scorer = TokenScorer(backend.scorer_id, lambda: pytest.fail("engine must not load"), full_vocabulary=True)
-    scorer.ensure(step)
-    assert step.token_logprobs == [-0.1, -0.2, -0.3, -0.4]
-
-
-def test_token_scorer_rescores_with_other_engine(scripted_backend_cls):
-    """Hybrid mode: steps generated (unscored) by vLLM are teacher-forced on Transformers."""
-    tf = scripted_backend_cls([], logprob=-0.7)
-    step = _step(lps=None, ents=None, scored_by=None, generation_meta={"compat": tf.info.compatibility_key()})
-    TokenScorer(tf.scorer_id, lambda: tf, full_vocabulary=True).ensure(step)
-    assert tf.score_calls == [([9, 9], [1, 2, 3, 4], True)]
-    assert step.scored_by == tf.scorer_id and step.token_logprobs == [-0.7] * 4 and len(step.token_entropies) == 4
-    assert NegativeLogLikelihood().estimate(step)[0] == pytest.approx(0.7)
-
-
-def test_token_scorer_rejects_incompatible_engine(scripted_backend_cls):
-    tf = scripted_backend_cls([])
-    step = _step(lps=None, ents=None, generation_meta={"compat": {"model": "other"}})
-    with pytest.raises(BackendCapabilityError, match="differs"):
-        TokenScorer(tf.scorer_id, lambda: tf, full_vocabulary=False).ensure(step)
-
-
-def test_build_token_scorers_share_engine(config, set_settings):
-    scorers = build_token_scorers(lambda m, kind: pytest.fail("lazy"))
-    assert scorers["solver"] is scorers["reviewer"]
-    assert scorers["solver"].scorer == scorer_id(config.model, "transformers") and scorers["solver"].full_vocabulary
-    set_settings(dataclasses.replace(config, model=ModelConfig(backend="vllm", scoring_backend="transformers")))
-    assert build_token_scorers(lambda m, k: None)["solver"].scorer.startswith("transformers:")
+@pytest.mark.nli
+def test_real_nli_semantic_density_prefers_agreeing_samples(scripted_backend_cls, with_uq):
+    """Real UQLM SemanticDensity + the configured NLI model: samples agreeing with the response score higher."""
+    with_uq("monte_carlo", num_generations=3)
+    response = "Subtracting 3 from both sides gives 2x = 4, so x = 2."
+    values = []
+    for samples in (
+        ["The answer is x = 2.", "x equals 2.", "Solving gives x = 2."],
+        ["The answer is x = 7.", "x equals 9.", "Solving gives x = -4."],
+    ):
+        backend = scripted_backend_cls([], samples={"": samples})
+        step = _mc_sampled(backend, _step(text=response, scored_by=backend.scorer_id))
+        values.append(SemanticDensity().score(build_view(step, backend, None), "Solve 2x + 3 = 7.")[0])
+    assert values[0] > values[1]
 
 
 def test_aggregation_known_values():
@@ -231,52 +291,47 @@ def test_aggregation_known_values():
 
 def _trajectory():
     def trace(agent, metrics_list):
-        steps = [_step(agent=agent, step_id=i, metrics=m) for i, m in enumerate(metrics_list)]
+        steps = [_step(agent=agent, step_id=i, run_id=3, round=i + 1, metrics=m) for i, m in enumerate(metrics_list)]
         return AgentTrace(agent_id=agent, role=agent, model="m", steps=steps)
 
-    m = lambda pe, se, nll, ln: {"pe": pe, "se": se, "nll": nll, "length": ln}  # noqa: E731
+    m = lambda mc, se, sd, ln: {"mcsp": mc, "se": se, "sd": sd, "length": ln}  # noqa: E731
     return Trajectory(
         problem_id="p1",
         problem="q",
         final_answer_text="\\boxed{2}",
+        run_id=3,
         agents=[
-            trace("solver", [m(3, 0, 1, 10), m(4, 0, 1, 30)]),
-            trace("reviewer", [m(1, 1, 2, 5)]),
+            trace("mathematician", [m(0.3, 0, 0.4, 10), m(0.4, 0, 0.6, 30)]),
+            trace("enthusiast", [m(0.9, 1, 0.5, 5)]),
         ],
     )
 
 
-def test_features_order_and_values(config):
+def test_features_are_four_metrics_per_agent(config):
     feats = extract_features(_trajectory())
-    assert list(feats) == config.features.order
-    assert feats["solver_pe"] == pytest.approx(math.sqrt(12.5))
-    assert feats["solver_length"] == 20
-    assert feats["reviewer_nll"] == 2
+    assert list(feats) == config.features.order and len(feats) == 8
+    assert feats["mathematician_mcsp"] == pytest.approx(math.sqrt((0.09 + 0.16) / 2))
+    assert feats["mathematician_length"] == 20
+    assert feats["enthusiast_se"] == 1 and feats["enthusiast_sd"] == pytest.approx(0.5)
+
+
+def test_step_metric_rows_carry_run_and_round():
+    rows = step_metric_rows(_trajectory())
+    assert [(r["agent_id"], r["run_id"], r["round"]) for r in rows] == [
+        ("mathematician", 3, 1),
+        ("mathematician", 3, 2),
+        ("enthusiast", 3, 1),
+    ]
 
 
 def test_aggregate_unknown_strategy(config, set_settings):
     with pytest.raises(ValueError):
         set_settings(
-            dataclasses.replace(config, aggregation=dataclasses.replace(config.aggregation, **{"nll": "median"}))
+            dataclasses.replace(
+                config, aggregation=dataclasses.replace(config.aggregation, **{"semantic_density": "median"})
+            )
         )
-        aggregate_agent(_trajectory().agents[0], ["nll"])
-
-
-def test_score_trajectory_and_rows(config, scripted_backend_cls):
-    backend = scripted_backend_cls([], samples={"": ["\\boxed{1}"] * 10})
-    traj = _trajectory()
-    sampler = SemanticSampler(backend)
-    for a in traj.agents:
-        for s in a.steps:
-            s.metrics = {}
-            s.scored_by = backend.scorer_id
-        sampler.sample_steps(a.steps)
-    scorers = build_token_scorers(lambda m, kind: pytest.fail("already scored at generation"))
-    scored = score_trajectory(traj, build_estimators(), scorers)
-    rows = step_metric_rows(scored)
-    assert set(rows[0]["metrics"]) == {"pe", "se", "nll", "length"}
-    assert traj.agents[0].steps[0].metrics == {}
-    assert len(backend.calls) == 3
+        aggregate_agent(_trajectory().agents[0], ["sd"])
 
 
 def _fake_nli(monkeypatch, id2label, probs):

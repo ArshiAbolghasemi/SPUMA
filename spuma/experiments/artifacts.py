@@ -1,8 +1,9 @@
-"""Artifact storage: JSON files under one experiment directory, written atomically (safe to resume)."""
+"""Artifact storage: JSON / JSONL files under one experiment directory, written atomically (safe to resume)."""
 
 import json
 import os
 import tempfile
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -44,3 +45,27 @@ class FileArtifactStore:
 
     def read_json(self, rel: str) -> Any:
         return json.loads(self.path(rel).read_text())
+
+    def write_jsonl(self, rel: str, rows: Iterable[Any]) -> Path:
+        p = self.path(rel)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=p.parent, suffix=".tmp")
+        with os.fdopen(fd, "w") as f:
+            for row in rows:
+                f.write(json.dumps(row, default=str) + "\n")
+        os.replace(tmp, p)
+        return p
+
+    def append_jsonl(self, rel: str, row: Any) -> Path:
+        """One line appended (progress logs; a crash loses at most the line being written)."""
+        p = self.path(rel)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with p.open("a") as f:
+            f.write(json.dumps(row, default=str) + "\n")
+        return p
+
+    def read_jsonl(self, rel: str) -> list[Any]:
+        return [json.loads(line) for line in self.path(rel).read_text().splitlines() if line]
+
+    def remove(self, rel: str) -> None:
+        self.path(rel).unlink(missing_ok=True)

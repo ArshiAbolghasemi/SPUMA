@@ -74,22 +74,22 @@ def test_fingerprints_separate_engines_and_generation():
 
 
 def test_generation_logprob_mode(config, set_settings):
+    """The shared samples (MCSP, SE, SD) need the raw log-prob of each generated token, never the full
+    distribution; with only token length there is nothing to score."""
     same = dataclasses.replace(config.model, backend="transformers", scoring_backend="same")
-    assert generation_logprob_mode(same) == "full"
+    assert generation_logprob_mode(same) == "token"
     hybrid = dataclasses.replace(config.model, **{"backend": "vllm", "scoring_backend": "transformers"})
     assert generation_logprob_mode(hybrid) == "none"
     uq = config.uncertainty
-    no_pe = dataclasses.replace(
-        uq, **{"predictive_entropy": dataclasses.replace(uq.predictive_entropy, **{"enabled": False})}
+    no_mc = dataclasses.replace(
+        uq,
+        monte_carlo_sequence_probability=dataclasses.replace(uq.monte_carlo_sequence_probability, enabled=False),
+        semantic_density=dataclasses.replace(uq.semantic_density, enabled=False),
+        semantic_entropy=dataclasses.replace(uq.semantic_entropy, enabled=False),
     )
-    set_settings(dataclasses.replace(config, uncertainty=no_pe, features=_features_without(config, "_pe")))
-    assert generation_logprob_mode(same) == "token"
-
-
-def _features_without(config, suffix):
-    return dataclasses.replace(
-        config.features, **{"order": [f for f in config.features.order if not f.endswith(suffix)]}
-    )
+    features = dataclasses.replace(config.features, order=[f for f in config.features.order if f.endswith("_length")])
+    set_settings(dataclasses.replace(config, uncertainty=no_mc, features=features))
+    assert generation_logprob_mode(same) == "none"
 
 
 @pytest.fixture
@@ -104,21 +104,19 @@ def with_model(config, set_settings):
     return install
 
 
-@pytest.mark.parametrize(
-    ("backend", "scoring", "gen_req", "score_req"),
-    [
-        ("transformers", "same", {"full_vocabulary_logprobs", "generated_token_logprobs"}, set()),
-        ("vllm", "same", {"full_vocabulary_logprobs", "generated_token_logprobs"}, set()),
-        ("vllm", "transformers", set(), {"teacher_forced_scoring", "full_vocabulary_scoring"}),
-    ],
-)
-def test_execution_plan_modes(with_model, backend, scoring, gen_req, score_req):
-    with_model(backend=backend, scoring_backend=scoring)
+@pytest.mark.parametrize("backend", ["transformers", "vllm"], ids=["tf-engine", "v-engine"])
+def test_execution_plan_needs_generation_time_token_logprobs(with_model, backend):
+    with_model(backend=backend, scoring_backend="same")
     plan = execution_plan()["default"]
-    assert plan["agents"] == ["solver", "reviewer"]
-    assert {"generation", "multiple_completions"} <= plan["generation_requires"]
-    assert gen_req <= plan["generation_requires"] and plan["scoring_requires"] == score_req
-    assert not ({"full_vocabulary_logprobs"} <= plan["generation_requires"]) or scoring == "same"
+    assert plan["agents"] == ["mathematician", "enthusiast"]
+    assert plan["generation_requires"] == {
+        "generation",
+        "multiple_completions",
+        "batch_generation",
+        "generated_token_logprobs",
+        "teacher_forced_scoring",
+    }
+    assert plan["scoring_requires"] == set()
 
 
 def test_validation_passes_for_transformers(with_model):
@@ -134,17 +132,13 @@ def test_validation_fails_early_without_vllm(with_model, monkeypatch):
         validate_backends()
 
 
-def test_validation_reports_capped_logprobs(with_model, set_settings, fake_vllm_module):
-    capped = with_model(backend="vllm", scoring_backend="same", vllm={"max_logprobs": 20})
-    with pytest.raises(BackendCapabilityError, match="full_vocabulary_logprobs"):
-        validate_backends()
-    raw = capped.to_dict()
-    raw["uncertainty"]["predictive_entropy"]["enabled"] = False
-    raw["features"]["order"] = [f for f in raw["features"]["order"] if not f.endswith("_pe")]
-    set_settings(Settings.from_dict(raw))
-    validate_backends()
+def test_capped_vllm_logprobs_are_enough(with_model, fake_vllm_module):
+    """Token log-probs (no full vocabulary) work with a capped `max_logprobs`."""
+    with_model(backend="vllm", scoring_backend="same", vllm={"max_logprobs": 20})
+    assert validate_backends()["default"]["generation_backend"] == "vllm"
 
 
-def test_hybrid_validates_scoring_backend(with_model, fake_vllm_module):
+def test_inline_uncertainty_rejects_a_separate_scoring_backend(with_model, fake_vllm_module):
     with_model(backend="vllm", scoring_backend="transformers")
-    assert validate_backends()["default"]["scoring_backend"] == "transformers"
+    with pytest.raises(BackendCapabilityError, match="scoring_backend: same"):
+        validate_backends()

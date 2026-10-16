@@ -129,14 +129,31 @@ class ScriptedBackend:
         self.prompts.append(text)
         return [ord(c) for c in text]
 
-    def generate(self, request: GenerationRequest) -> list[GenerationResult]:
-        self.calls.append(request)
+    def _sample_texts(self, request: GenerationRequest, index: int) -> list[str]:
+        """n > 1: the first n scripted samples; n == 1: the index-th (one request per sample, cycling)."""
         prompt = "".join(chr(i) for i in request.prompt_ids)
-        if request.n == 1:
-            texts = [self.outputs.pop(0)]
-        else:
-            key = next((k for k in self.samples if k in prompt), None)
-            texts = self.samples[key][: request.n] if key is not None else [f"sample {i}" for i in range(request.n)]
+        key = next((k for k in self.samples if k in prompt), None)
+        texts = self.samples[key] if key is not None else [f"sample {i}" for i in range(10)]
+        return texts[: request.n] if request.n > 1 else [texts[index % len(texts)]]
+
+    def generate(self, request: GenerationRequest) -> list[GenerationResult]:
+        """Agent responses: n == 1 replays the next scripted output; n > 1 returns scripted samples."""
+        self.calls.append(request)
+        texts = [self.outputs.pop(0)] if request.n == 1 else self._sample_texts(request, 0)
+        return self._results(request, texts)
+
+    def generate_batch(self, requests):
+        """Sampling: every request returns scripted samples (the i-th n=1 request of a prompt gets the i-th)."""
+        seen: dict[tuple[int, ...], int] = {}
+        out = []
+        for r in requests:
+            self.calls.append(r)
+            index = seen.get(tuple(r.prompt_ids), 0)
+            seen[tuple(r.prompt_ids)] = index + 1
+            out.append(self._results(r, self._sample_texts(r, index)))
+        return out
+
+    def _results(self, request: GenerationRequest, texts: list[str]) -> list[GenerationResult]:
         out = []
         for t in texts:
             ids = [ord(c) for c in t] or [0]
@@ -161,9 +178,6 @@ class ScriptedBackend:
             )
         return out
 
-    def generate_batch(self, requests):
-        return [self.generate(r) for r in requests]
-
     def score(self, prompt_ids, token_ids, full_vocabulary):
         self.score_calls.append((list(prompt_ids), list(token_ids), full_vocabulary))
         ents = [math.log(2)] * len(token_ids) if full_vocabulary else None
@@ -174,6 +188,9 @@ class ScriptedBackend:
 
     def count_tokens(self, text: str) -> int:
         return len(text)
+
+    def encode(self, text: str) -> list[int]:
+        return [ord(c) for c in text]
 
     def close(self) -> None:
         self.closed = True

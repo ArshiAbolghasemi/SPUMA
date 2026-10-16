@@ -111,6 +111,10 @@ class MicroBatcher:
         with self._tokenizer_lock:
             return self.backend.count_tokens(text)
 
+    def encode(self, text: str) -> list[int]:
+        with self._tokenizer_lock:
+            return self.backend.encode(text)
+
     def score(self, prompt_ids: list[int], token_ids: list[int], full_vocabulary: bool) -> TokenScores:
         return self.backend.score(prompt_ids, token_ids, full_vocabulary)
 

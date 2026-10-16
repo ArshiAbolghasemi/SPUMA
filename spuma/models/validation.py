@@ -35,18 +35,11 @@ def execution_plan() -> dict[str, dict[str, Any]]:
             },
         )
         entry["agents"].append(agent.id)
-        gen, score = entry["generation_requires"], entry["scoring_requires"]
-        if uq.semantic_entropy.enabled:
+        gen = entry["generation_requires"]
+        if uq.semantic_entropy.enabled or uq.monte_carlo_enabled:
             gen |= {"multiple_completions", "batch_generation"}
-        if uq.predictive_entropy.enabled or uq.nll.enabled:
-            if model.scores_at_generation:
-                gen.add("generated_token_logprobs")
-                if uq.predictive_entropy.enabled:
-                    gen.add("full_vocabulary_logprobs")
-            else:
-                score.add("teacher_forced_scoring")
-                if uq.predictive_entropy.enabled:
-                    score.add("full_vocabulary_scoring")
+        if uq.monte_carlo_enabled:
+            gen |= {"generated_token_logprobs", "teacher_forced_scoring"}
     return plan
 
 
@@ -57,6 +50,11 @@ def validate_backends() -> dict[str, dict[str, Any]]:
     problems = []
     for key, entry in plan.items():
         model = config.all_models()[key]
+        if config.uncertainty.monte_carlo_enabled and not model.scores_at_generation:
+            problems.append(
+                f"model {key!r}: uncertainty is measured right after each response with the generating engine; "
+                "set model.scoring_backend: same"
+            )
         for role, kind in (("generation", entry["generation_backend"]), ("scoring", entry["scoring_backend"])):
             needed = sorted(entry[f"{role}_requires"])
             if not needed:
@@ -68,12 +66,6 @@ def validate_backends() -> dict[str, dict[str, Any]]:
                 continue
             if missing := caps.missing(*needed):
                 problems.append(f"model {key!r} {role} backend {kind!r} lacks {missing}")
-        if entry["scoring_backend"] == "vllm" and "full_vocabulary_scoring" in entry["scoring_requires"]:
-            logger.warning(
-                "PE via vLLM teacher-forced scoring transfers |V| x (prompt + continuation) floats per step; "
-                "consider scoring_backend: transformers",
-                extra={"model": key},
-            )
     out = {k: {**v, **{r: sorted(v[r]) for r in ("generation_requires", "scoring_requires")}} for k, v in plan.items()}
     if problems:
         logger.error("backend capability validation failed", extra={"problems": problems, "plan": out})

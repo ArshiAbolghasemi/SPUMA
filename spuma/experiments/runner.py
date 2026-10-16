@@ -1,27 +1,32 @@
 """Experiment execution: generate -> score -> train -> evaluate.
 
-Each agent answers in one model call. With a hybrid backend setup
-(`model.backend: vllm`, `model.scoring_backend: transformers`) the generation engines are released
-after the generate phase, so the scoring engine never shares the GPU with them.
+generate runs `agents.num_runs` independent runs of the agent workflow per problem; uncertainty (MCSP, SE, SD,
+token length) is measured inside the graph right after every response, on the generating engine
+(`model.scoring_backend: same`). score turns the measured steps into features; train/evaluate fit and score
+the risk models.
 
     artifacts/<experiment>/
       config.json                      sanitized config snapshot
       splits.json                      problem ids per split
-      runs/<run_id>.json               reproducibility metadata of each invocation
+      runs/<invocation>.json           reproducibility metadata of each invocation
       generation-<gen fp>/
-        trajectories/<problem>.json    raw trajectory (exact contexts, tokens, generation-time scores,
-                                       semantic-entropy samples) + grade
-        scored-<scoring fp>/
-          steps/<problem>.json         trajectory with step metrics and semantic-entropy samples
+        agents.json                    agent settings
+        trajectories/<problem>/run-<k>.json
+                                       one run: conversation, every step (prompt, tokens, log-probs, samples,
+                                       seeds, UQ scores), rounds, termination reason, grade
+        trajectories/<problem>/run-<k>.steps.jsonl
+                                       the same steps, appended as they are measured (progress log)
+        scored-<feature fp>/
           step_metrics.json            per-step metric rows
-          features.json                Z (8 features), label Y, parse failure
-          models/<name>.pt             risk-model checkpoints (evaluation.risk_models; today: spn)
+          steps.jsonl                  one full step per line, every run
+          features.json                Z per (problem, run), label Y, parse failure
+          models/<name>.pt             risk-model checkpoints (evaluation.risk_models)
           evaluation.json              risk models on validation/test
       summary.json                     test accuracy and risk-model metrics
 
-Fingerprints in directory names (generation: model/backend/sampling/agents/SE settings;
-scoring: scoring engine + UQ/aggregation/feature settings) mean a config change never reuses stale
-artifacts; with `experiment.resume`, existing artifacts are reused instead of recomputed.
+Fingerprints in directory names (generation: model, agents, seeds, uncertainty settings; features:
+aggregation and feature settings) mean a config change never reuses stale artifacts; with
+`experiment.resume`, finished runs are kept and only missing or failed runs are generated again.
 """
 
 import logging
@@ -29,8 +34,8 @@ import platform
 import subprocess
 import sys
 import uuid
-from collections.abc import Callable, Iterator
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from datetime import UTC, datetime
 from importlib import metadata
@@ -41,8 +46,8 @@ import numpy as np
 from spuma.agents.trajectory import Trajectory
 from spuma.agents.workflow import build_workflow
 from spuma.common.config import to_plain
-from spuma.common.logs import progress
-from spuma.common.utils import safe_name
+from spuma.common.logs import progress, progress_counter
+from spuma.common.utils import MainThreadCalls, derive_seed, safe_name
 from spuma.config import PROJECT_ROOT, get_settings
 from spuma.dataset.base import AnswerGrader, DatasetProvider, Problem
 from spuma.dataset.registry import get_dataset, get_grader
@@ -54,13 +59,7 @@ from spuma.models.batching import MicroBatcher
 from spuma.models.config import ModelConfig
 from spuma.models.engines import get_backend, release_backends
 from spuma.models.validation import validate_backends
-from spuma.uncertainty.estimators import (
-    SemanticSampler,
-    build_estimators,
-    build_token_scorers,
-    score_trajectory,
-    step_metric_rows,
-)
+from spuma.uncertainty.estimators import StepUncertainty, step_metric_rows
 from spuma.uncertainty.features import extract_features
 
 logger = logging.getLogger(__name__)
@@ -102,18 +101,13 @@ class ExperimentRunner:
             self.write_splits(limit)
             logger.info("generate", extra={"dir": self.generation_dir()})
             self.generate()
-            if self._hybrid():
-                logger.info("releasing generation engines before scoring (hybrid backends)")
-                self.release()
+            self.release()
         if "score" in phases:
             self.score()
         if "train" in phases:
             self.train()
         if "evaluate" in phases:
             self.evaluate()
-
-    def _hybrid(self) -> bool:
-        return any(not m.scores_at_generation for m in get_settings().all_models().values())
 
     def metadata(self, phases: list[str], limit: int | None, plan: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -130,26 +124,47 @@ class ExperimentRunner:
             "langchain-core",
             "spflow",
             "math-verify",
+            "uqlm",
         ]
-        se = get_settings().uncertainty.semantic_entropy
+        config = get_settings()
+        se, mc = config.uncertainty.semantic_entropy, config.uncertainty.monte_carlo
         return {
             "run_id": self.run_id,
             "started": datetime.now(UTC).isoformat(),
             "argv": sys.argv,
             "phases": phases,
             "limit": limit,
-            "seed": get_settings().project.seed,
+            "base_seed": config.project.seed,
+            "seed_derivation": "sha256(base_seed, problem_id, run_id, agent_id, round[, sample index])",
             "git_commit": commit,
             "python": platform.python_version(),
             "platform": platform.platform(),
             "packages": {p: _version(p) for p in packages},
+            "agents": {
+                "workflow": config.agents.workflow,
+                "num_runs": config.agents.num_runs,
+                "max_rounds": config.agents.max_rounds,
+                "completion_token": config.agents.completion_token,
+            },
             "semantic_entropy_policy": {
                 "n": se.n,
                 "top_k": None,
                 "temperature": se.temperature,
                 "top_p": se.top_p,
                 "clustering": "uqlm",
+                "equivalence": se.equivalence,
                 "nli_model": se.nli_model_name,
+            },
+            "monte_carlo_policy": {
+                "num_generations": mc.num_generations,
+                "temperature": mc.temperature,
+                "top_p": mc.top_p,
+                "top_k": mc.top_k,
+                "length_normalize": mc.length_normalize,
+                "seed_strategy": "per_sample",
+                "uqlm_mode": "white_box",
+                "scorers": {"mcsp": "monte_carlo_probability", "sd": "semantic_density"},
+                "nli_model": config.uncertainty.semantic_density.nli_model_name,
             },
             "generation_dir": self.generation_dir(),
             "backends": {
@@ -173,11 +188,6 @@ class ExperimentRunner:
         """(split, index, problem) over every split, in split order."""
         return [(split, i, p) for split, problems in self.problems().items() for i, p in enumerate(problems)]
 
-    def _each_problem(self, phase: str) -> Iterator[tuple[str, int, Problem]]:
-        """`_all_problems()` with a progress bar for the phase."""
-        items = self._all_problems()
-        return progress(items, total=len(items), desc=phase)
-
     def _backends(self) -> dict[str, ModelBackend]:
         """Generation engine per agent (shared by agents on the same model)."""
         config = get_settings()
@@ -185,102 +195,137 @@ class ExperimentRunner:
             a.id: self.backend_factory(config.model_for(a), config.model_for(a).backend) for a in config.agents.enabled
         }
 
-    def generate(self) -> None:
-        """Run the workflow (+ semantic-entropy sampling) for every problem not generated yet.
+    def run_path(self, problem: Problem, run: int, suffix: str = ".json") -> str:
+        return f"{self.generation_dir()}/trajectories/{safe_name(problem.problem_id)}/run-{run}{suffix}"
 
-        `experiment.concurrent_problems` workflows run at once in worker threads; with more than one, their
-        model calls share batched engine calls. Grading and saving stay in the main thread (Math-Verify's
-        timeouts use signals, which only work there).
+    def _all_runs(self) -> list[tuple[str, int, Problem, int]]:
+        """(split, index, problem, run) for every run of every problem, in split order."""
+        n = get_settings().agents.num_runs
+        return [(split, i, p, k) for split, i, p in self._all_problems() for k in range(n)]
+
+    def generate(self) -> None:
+        """Run every (problem, run) not finished yet; uncertainty is measured inside the graph.
+
+        `experiment.concurrent_problems` runs go at once in worker threads, each from a fresh graph state; with
+        more than one, their model calls share batched engine calls. The main thread serves the NLI and
+        math-verify parts of the uncertainty measurement (`MainThreadCalls`), grades, and saves.
         """
-        concurrency = get_settings().experiment.concurrent_problems
+        config = get_settings()
+        concurrency = config.experiment.concurrent_problems
         backends = self._backends()
         batchers: dict[int, MicroBatcher] = {}
         if concurrency > 1:
             backends = {a: batchers.setdefault(id(b), MicroBatcher(b)) for a, b in backends.items()}
-        se_enabled = get_settings().uncertainty.semantic_entropy.enabled
-        samplers = {a: SemanticSampler(b) for a, b in backends.items()} if se_enabled else {}
-        workflow = build_workflow(backends.__getitem__)
-        self.store.write_json(f"{self.generation_dir()}/agents.json", [a.describe() for a in workflow.agents])
+        main = MainThreadCalls()
+        uq = StepUncertainty(backends.__getitem__, main.call)
+        self.store.write_json(
+            f"{self.generation_dir()}/agents.json",
+            [a.describe() for a in build_workflow(backends.__getitem__).agents],
+        )
 
         pending, done = [], 0
-        for split, i, problem in self._all_problems():
-            rel = f"{self.generation_dir()}/trajectories/{safe_name(problem.problem_id)}.json"
-            trajectory, grade = None, None
-            if get_settings().experiment.resume and self.store.exists(rel):
-                record = self.store.read_json(rel)
-                trajectory = Trajectory.model_validate(record["trajectory"])
-                if not any(
-                    samplers[t.agent_id].needs_samples(s)
-                    for t in trajectory.agents
-                    for s in t.steps
-                    if t.agent_id in samplers
-                ):
+        for split, i, problem, run in self._all_runs():
+            rel = self.run_path(problem, run)
+            if config.experiment.resume and self.store.exists(rel):
+                if self.store.read_json(rel)["trajectory"]["termination_reason"] != "error":
                     done += 1
                     continue
-                grade = record["grade"]
-            pending.append((split, i, problem, rel, trajectory, grade))
+            pending.append((split, i, problem, run))
         logger.info("generate", extra={"pending": len(pending), "already_done": done, "concurrent": concurrency})
 
-        def run_problem(problem: Problem, trajectory: Trajectory | None) -> Trajectory:
-            if trajectory is None:
-                trajectory = workflow.run(problem.problem_id, problem.problem)
-            for trace in trajectory.agents:
-                if trace.agent_id in samplers:
-                    samplers[trace.agent_id].sample_steps(trace.steps)
-            return trajectory
+        def run_one(problem: Problem, run: int) -> Trajectory:
+            log = self.run_path(problem, run, ".steps.jsonl")
+            self.store.remove(log)
+            workflow = build_workflow(
+                backends.__getitem__, uq, lambda step: self.store.append_jsonl(log, step.model_dump())
+            )
+            return workflow.run(problem.problem_id, problem.problem, run)
 
-        pool = ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="spuma-problem")
+        pool = ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="spuma-run")
+        futures = {pool.submit(run_one, p, k): (split, i, p, k) for split, i, p, k in pending}
         try:
-            futures = {pool.submit(run_problem, p, t): (split, i, p, rel, g) for split, i, p, rel, t, g in pending}
-            for future in progress(as_completed(futures), total=len(futures), desc="generate"):
-                split, i, problem, rel, grade = futures[future]
-                trajectory = future.result()
-                grade = grade or self.grader.grade(problem, trajectory.final_answer_text).to_dict()
-                self.store.write_json(rel, {"split": split, "trajectory": trajectory.model_dump(), "grade": grade})
-                logger.info(
-                    "generated",
-                    extra={"split": split, "index": i, "problem_id": problem.problem_id, "label": grade["label"]},
-                )
+            with progress_counter(len(futures), "generate") as advance:
+                while futures:
+                    main.serve(0.05)
+                    for future in [f for f in futures if f.done()]:
+                        split, i, problem, run = futures.pop(future)
+                        self._save_run(split, i, problem, run, future.result())
+                        advance()
         finally:
+            main.close()
             pool.shutdown(wait=True, cancel_futures=True)
             for batcher in batchers.values():
                 batcher.stop()
 
+    def _save_run(self, split: str, i: int, problem: Problem, run: int, trajectory: Trajectory) -> None:
+        failed = trajectory.termination_reason == "error"
+        grade = None if failed else self.grader.grade(problem, trajectory.final_answer_text).to_dict()
+        record = {
+            "split": split,
+            "run_id": run,
+            "run_seed": derive_seed(get_settings().project.seed, problem.problem_id, run),
+            "trajectory": trajectory.model_dump(),
+            "grade": grade,
+        }
+        self.store.write_json(self.run_path(problem, run), record)
+        logger.info(
+            "generated",
+            extra={
+                "split": split,
+                "index": i,
+                "problem_id": problem.problem_id,
+                "run_id": run,
+                "rounds": trajectory.rounds,
+                "termination": trajectory.termination_reason,
+                "label": None if failed else grade["label"],
+            },
+        )
+
     def score(self) -> None:
-        estimators = build_estimators()
-        scorers = build_token_scorers(self.backend_factory)
+        """Features from the measured steps of every finished run; failed or missing runs are reported, not
+        filled in."""
         out_dir = self.scored_dir()
-        rows, step_rows = [], []
-        for split, _, problem in self._each_problem("score"):
-            name = safe_name(problem.problem_id)
-            rel = f"{out_dir}/steps/{name}.json"
-            if get_settings().experiment.resume and self.store.exists(rel):
-                record = self.store.read_json(rel)
-            else:
-                raw = self.store.read_json(f"{self.generation_dir()}/trajectories/{name}.json")
-                scored = score_trajectory(Trajectory.model_validate(raw["trajectory"]), estimators, scorers)
-                record = {**raw, "trajectory": scored.model_dump()}
-                self.store.write_json(rel, record)
+        rows, step_rows, step_records, skipped = [], [], [], []
+        for split, _, problem, run in progress(self._all_runs(), total=len(self._all_runs()), desc="score"):
+            rel = self.run_path(problem, run)
+            if not self.store.exists(rel):
+                skipped.append({"problem_id": problem.problem_id, "run_id": run, "reason": "missing"})
+                continue
+            record = self.store.read_json(rel)
             trajectory = Trajectory.model_validate(record["trajectory"])
+            if trajectory.termination_reason == "error":
+                skipped.append({"problem_id": problem.problem_id, "run_id": run, "reason": trajectory.error})
+                continue
             step_rows.extend(step_metric_rows(trajectory))
+            step_records.extend(
+                {"split": split, "role": a.role, **s.model_dump()} for a in trajectory.agents for s in a.steps
+            )
             rows.append(
                 {
                     "problem_id": problem.problem_id,
+                    "run_id": run,
                     "split": split,
                     "features": extract_features(trajectory),
                     "label": record["grade"]["label"],
                     "parse_failure": record["grade"]["parse_failure"],
+                    "rounds": trajectory.rounds,
+                    "termination_reason": trajectory.termination_reason,
                 }
             )
+        if skipped:
+            logger.warning("runs without features", extra={"count": len(skipped), "runs": skipped[:20]})
         self.store.write_json(f"{out_dir}/step_metrics.json", step_rows)
+        self.store.write_jsonl(f"{out_dir}/steps.jsonl", step_records)
         self.store.write_json(f"{out_dir}/features.json", rows)
-        logger.info("scored", extra={"problems": len(rows)})
+        self.store.write_json(f"{out_dir}/skipped_runs.json", skipped)
+        logger.info("scored", extra={"runs": len(rows), "skipped": len(skipped)})
 
-    def _matrix(self, split: str) -> tuple[np.ndarray, np.ndarray, list[str]]:
+    def _matrix(self, split: str) -> tuple[np.ndarray, np.ndarray, list[dict[str, Any]]]:
+        """One row per (problem, run) of `split`."""
         rows = [r for r in self.store.read_json(f"{self.scored_dir()}/features.json") if r["split"] == split]
         order = get_settings().features.order
         Z = np.array([[r["features"][f] for f in order] for r in rows], dtype=float).reshape(len(rows), len(order))
-        return Z, np.array([r["label"] for r in rows], dtype=int), [r["problem_id"] for r in rows]
+        return Z, np.array([r["label"] for r in rows], dtype=int), rows
 
     def model_path(self, name: str) -> str:
         return f"{self.scored_dir()}/models/{name}{risk_model_spec(name).suffix}"
@@ -320,19 +365,25 @@ class ExperimentRunner:
                 models[name] = risk_model_spec(name).load(path)
         result: dict[str, Any] = {"run_id": self.run_id, "splits": {}}
         for split in ("validation", "test"):
-            Z, y, ids = self._matrix(split)
+            Z, y, rows = self._matrix(split)
             if not len(y):
                 continue
             split_res: dict[str, Any] = {"n": len(y), "accuracy": float(1 - y.mean()), "models": {}, "predictions": {}}
-            groups = np.array(ids)
+            groups = np.array([r["problem_id"] for r in rows])
             for name, model in models.items():
                 p = model.predict_error_proba(Z)
                 h = binary_entropy(p)
                 split_res["models"][name] = evaluate(y, p, ev.metrics, groups, boot, ev.ece_bins)
                 split_res["models"][f"{name}_posterior_entropy"] = evaluate(y, h, ranking, groups, boot, ev.ece_bins)
                 split_res["predictions"][name] = [
-                    {"problem_id": i, "label": int(t), "p_incorrect": float(a), "posterior_entropy": float(b)}
-                    for i, t, a, b in zip(ids, y, p, h, strict=True)
+                    {
+                        "problem_id": r["problem_id"],
+                        "run_id": r["run_id"],
+                        "label": int(t),
+                        "p_incorrect": float(a),
+                        "posterior_entropy": float(b),
+                    }
+                    for r, t, a, b in zip(rows, y, p, h, strict=True)
                 ]
             result["splits"][split] = split_res
         self.store.write_json(f"{self.scored_dir()}/evaluation.json", result)

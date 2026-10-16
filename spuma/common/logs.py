@@ -7,7 +7,8 @@ run id set by `set_run_id`. Third-party chatter is capped at WARNING.
 import json
 import logging
 import sys
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -82,3 +83,10 @@ def progress[T](items: Iterable[T], total: int, desc: str) -> Iterator[T]:
     instead of breaking it; the bar is hidden when stderr is not a terminal (log files, CI, tests)."""
     with logging_redirect_tqdm():
         yield from tqdm(items, total=total, desc=desc, unit="problem", dynamic_ncols=True, disable=None)
+
+
+@contextmanager
+def progress_counter(total: int, desc: str) -> Iterator[Callable[[], None]]:
+    """A tqdm bar advanced by calling the yielded function (work finishing in any order)."""
+    with logging_redirect_tqdm(), tqdm(total=total, desc=desc, unit="run", dynamic_ncols=True, disable=None) as bar:
+        yield lambda: bar.update(1)

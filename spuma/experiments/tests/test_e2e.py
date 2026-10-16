@@ -1,5 +1,6 @@
-"""End-to-end: MATH-like problems -> Solver/Reviewer (one step each) -> step UQ -> RMS -> 8 features + label
--> SPN train/infer -> AUROC/AUARC, with a deterministic fake model."""
+"""End-to-end: MATH-like problems -> Mathematician <-> Enthusiast feedback loop, several runs per problem, UQ
+after every response (MCSP, SE, SD, length) -> per-agent aggregation -> 8 features + label per run -> SPN
+train/infer -> AUROC/AUARC, with a deterministic fake model."""
 
 import json
 import math
@@ -10,9 +11,12 @@ import pytest
 from spuma.common.config import to_plain
 from spuma.dataset.base import Problem
 from spuma.experiments.runner import ExperimentRunner
-from spuma.models.backend import BackendInfo, GenerationResult, TokenScores, scorer_id
+from spuma.models.backend import BackendCapabilityError, BackendInfo, GenerationResult, TokenScores, scorer_id
 from spuma.models.chat import parse_qwen_output, to_chat_dicts
 from spuma.models.tests.fixtures import ALL_CAPABILITIES
+
+RUNS, ROUNDS = 2, 3
+METRICS = {"mcsp", "se", "sd", "length"}
 
 
 def _is_wrong(a: int, b: int) -> bool:
@@ -20,16 +24,18 @@ def _is_wrong(a: int, b: int) -> bool:
 
 
 class FakeMathModel:
-    """Answers 'What is A+B?'; deliberately wrong on some problems,
-    with lower confidence and more diverse samples there, so uncertainty carries signal.
+    """Plays both roles on 'What is A+B?'. The Mathematician answers, deliberately wrong on some problems, with
+    lower confidence and more diverse samples there, so uncertainty carries signal; the Enthusiast asks once and
+    then replies TASK_DONE.
 
-    Plays the `kind` engine (transformers or vllm) of `model`; scores are a deterministic function of
-    the prompt, so generation-time and teacher-forced scores agree like they do for real backends."""
+    Scores are a deterministic function of the prompt, so generation-time and teacher-forced scores agree like
+    they do for real backends."""
 
     capabilities = ALL_CAPABILITIES
 
     def __init__(self, model, kind):
         self.name, self.calls, self.score_calls, self.closed = kind, 0, 0, False
+        self.fail_batches_for: set[str] = set()
         self.scorer_id = scorer_id(model, kind)
         self.info = BackendInfo(kind, model.name, None, model.name, None, "tmpl", 128, False, "bf16", None)
 
@@ -44,28 +50,26 @@ class FakeMathModel:
 
     def _answer(self, prompt):
         a, b, wrong = self._wrong(prompt)
+        if prompt.startswith("<system>You are the Curious Math Enthusiast"):
+            return ("TASK_DONE" if "<assistant>" in prompt else "Why is that the sum?"), False
         return f"The sum is \\boxed{{{a + b + (1 if wrong else 0)}}}", wrong
 
-    def _stats(self, prompt, n_tokens, full):
+    def _stats(self, prompt, n_tokens):
         _, _, wrong = self._wrong(prompt)
-        lp, ent = (-1.2, 2.0) if wrong else (-0.1, 0.4)
-        jitter = (len(prompt) % 100) / 1000
-        return [lp - jitter] * n_tokens, ([ent + jitter] * n_tokens if full else None)
+        lp = -1.2 if wrong else -0.1
+        return [lp - (len(prompt) % 100) / 1000] * n_tokens
 
     def generate(self, request):
         self.calls += 1
         prompt = "".join(map(chr, request.prompt_ids))
         text, wrong = self._answer(prompt)
-        texts = (
-            [text.replace("\\boxed{", "\\boxed{1" if (wrong and i % 2) else "\\boxed{") for i in range(request.n)]
-            if request.n > 1
-            else [text]
-        )
+        texts = [
+            text.replace("\\boxed{", "\\boxed{1" if (wrong and (request.seed + i) % 2) else "\\boxed{")
+            for i in range(request.n)
+        ]
         out = []
         for t in texts:
-            lps, ents = (None, None)
-            if request.logprobs != "none":
-                lps, ents = self._stats(prompt, len(t), request.logprobs == "full")
+            lps = self._stats(prompt, len(t)) if request.logprobs != "none" else None
             out.append(
                 GenerationResult(
                     [ord(c) for c in t],
@@ -79,25 +83,30 @@ class FakeMathModel:
                     to_plain(request.params),
                     request.logprobs,
                     lps,
-                    ents,
+                    None,
                     self.scorer_id if lps else None,
                 )
             )
         return out
 
     def generate_batch(self, requests):
+        prompts = ["".join(map(chr, r.prompt_ids)) for r in requests]
+        if any(p in prompt for p in self.fail_batches_for for prompt in prompts):
+            raise RuntimeError("sampling failed")
         return [self.generate(r) for r in requests]
 
     def score(self, prompt_ids, token_ids, full_vocabulary):
         self.score_calls += 1
-        lps, ents = self._stats("".join(map(chr, prompt_ids)), len(token_ids), full_vocabulary)
-        return TokenScores(lps, ents, self.scorer_id)
+        return TokenScores(self._stats("".join(map(chr, prompt_ids)), len(token_ids)), None, self.scorer_id)
 
     def parse(self, text):
         return parse_qwen_output(text)
 
     def count_tokens(self, text):
         return len(text)
+
+    def encode(self, text):
+        return [ord(c) for c in text]
 
     def close(self):
         self.closed = True
@@ -121,6 +130,7 @@ def _config(config, tmp_path, backend="transformers", scoring="same", concurrent
     raw = config.to_dict()
     raw["experiment"]["output_dir"] = str(tmp_path)
     raw["experiment"]["concurrent_problems"] = concurrent
+    raw["agents"]["num_runs"], raw["agents"]["max_rounds"] = RUNS, ROUNDS
     raw["evaluation"]["bootstrap"]["iterations"] = 50
     raw["spn"]["min_instances_slice"] = 20
     raw["model"]["backend"], raw["model"]["scoring_backend"] = backend, scoring
@@ -154,18 +164,24 @@ def fake_capabilities(monkeypatch):
     monkeypatch.setattr("spuma.models.validation.backend_class", lambda kind: cls)
 
 
+def _run(runner, problem_id, run):
+    return runner.store.read_json(
+        f"{runner.generation_dir()}/trajectories/{problem_id.replace('/', '__')}/run-{run}.json"
+    )
+
+
 def test_full_pipeline(config, set_settings, tmp_path, fake_capabilities):
     cfg = set_settings(_config(config, tmp_path))
     engines = Engines()
     runner = ExperimentRunner(FakeDataset(), engines.factory, release=engines.release)
     runner.run()
     store = runner.store
-    assert [e[:2] for e in engines.events] == [("load", "transformers")]
+    assert engines.events == [("load", "transformers", ["transformers"]), ("release", ["transformers"])]
     model = engines.all[0]
-    assert model.score_calls == 0
+    assert model.score_calls == 0  # no completion marker to strip with text around it: nothing teacher-forced
 
     summary = store.read_json("summary.json")
-    assert summary["n"] == 30 and 0 < summary["accuracy"] < 1
+    assert summary["n"] == 30 * RUNS and 0 < summary["accuracy"] < 1
     assert summary["models"]["spn"]["auroc"] > 0.9
     assert summary["models"]["spn"]["auarc"] > summary["accuracy"]
     names = {"spn", "spn_class_conditional"}
@@ -173,73 +189,114 @@ def test_full_pipeline(config, set_settings, tmp_path, fake_capabilities):
 
     d = runner.scored_dir()
     feats = store.read_json(f"{d}/features.json")
-    assert len(feats) == 100 and list(feats[0]["features"]) == cfg.features.order
+    assert len(feats) == 100 * RUNS and list(feats[0]["features"]) == cfg.features.order
+    assert {(r["problem_id"], r["run_id"]) for r in feats} == {(f["problem_id"], k) for f in feats for k in range(RUNS)}
+    assert store.read_json(f"{d}/skipped_runs.json") == []
 
-    pid = feats[0]["problem_id"].replace("/", "__")
-    rec = store.read_json(f"{d}/steps/{pid}.json")
-    solver = rec["trajectory"]["agents"][0]
-    assert len(solver["steps"]) == 1 and solver["steps"][0]["input_messages"][-1]["role"] == "user"
-    assert set(solver["steps"][0]["metrics"]) == {"pe", "se", "nll", "length"}
-    assert len(solver["steps"][0]["uq_details"]["se_samples"]["texts"]) == 10
-    assert 0 <= solver["steps"][0]["uq_details"]["se"]["semantic_negentropy"] <= 1
-    assert solver["steps"][0]["scored_by"] == model.scorer_id
-    assert solver["steps"][0]["metrics"]["length"] == len(solver["steps"][0]["token_ids"])
-    assert rec["grade"]["label"] in (0, 1)
+    record = _run(runner, feats[0]["problem_id"], 1)
+    traj = record["trajectory"]
+    assert record["run_id"] == 1 and record["run_seed"] and record["grade"]["label"] in (0, 1)
+    assert traj["rounds"] == 2 and traj["termination_reason"] == "task_done"
+    assert [(m["agent_id"], m["round"]) for m in traj["messages"]] == [
+        ("mathematician", 1),
+        ("enthusiast", 1),
+        ("mathematician", 2),
+        ("enthusiast", 2),
+    ]
+    mathematician, enthusiast = traj["agents"]
+    steps = mathematician["steps"] + enthusiast["steps"]
+    assert all(set(s["metrics"]) == METRICS and s["run_id"] == 1 for s in steps)
+    first = mathematician["steps"][0]
+    assert "se_samples" not in first["uq_details"] and 0 <= first["metrics"]["se"]
+    mc = first["uq_details"]["mc_samples"]
+    assert len(mc["texts"]) == len(mc["token_logprobs"]) == 10 and len(set(mc["seeds"])) == 10
+    assert 0 < first["metrics"]["mcsp"] <= 1 and 0 <= first["metrics"]["sd"] <= 1
+    assert (
+        first["metrics"]["length"] == len(first["token_ids"]) and first["uq_details"]["sd"]["nli_prompt"] == "problem"
+    )
+    done = enthusiast["steps"][-1]
+    assert done["text"] == "TASK_DONE" and done["uq_details"]["view"]["marker_only_texts"] == 11
+    progress_log = store.read_jsonl(
+        f"{runner.generation_dir()}/trajectories/{feats[0]['problem_id'].replace('/', '__')}/run-1.steps.jsonl"
+    )
+    assert [(s["agent_id"], s["round"]) for s in progress_log] == [
+        (m["agent_id"], m["round"]) for m in traj["messages"]
+    ]
+
+    lines = store.read_jsonl(f"{d}/steps.jsonl")
+    assert len(lines) == 4 * 100 * RUNS
+    line = lines[0]
+    assert {"problem_id", "run_id", "agent_id", "round", "input_messages", "text", "seed", "generation_params"} <= set(
+        line
+    )
+    assert line["token_logprobs"] and set(line["metrics"]) == METRICS and line["uq_details"]["mc_samples"]["seeds"]
+    rows = store.read_json(f"{d}/step_metrics.json")
+    assert len(rows) == len(lines) and {"run_id", "round"} <= set(rows[0])
 
     ev = store.read_json(f"{d}/evaluation.json")
     preds = ev["splits"]["test"]["predictions"]["spn"]
+    assert len(preds) == 30 * RUNS and {p["run_id"] for p in preds} == set(range(RUNS))
     assert all(0 <= p["p_incorrect"] <= 1 and 0 <= p["posterior_entropy"] <= math.log(2) + 1e-9 for p in preds)
     assert "ci_low" in ev["splits"]["test"]["models"]["spn"]["auroc"]
+    assert set(ev["splits"]["test"]["models"]["spn"]) >= {"auroc", "auprc", "auarc", "aurc", "brier", "ece", "nll"}
     status = store.read_json(f"{d}/models/spn_status.json")
-    assert status["status"] == "trained" and status["train_rows"] == 60
+    assert status["status"] == "trained" and status["train_rows"] == 60 * RUNS
 
     meta = json.loads(next(store.path("runs").iterdir()).read_text())
-    assert meta["semantic_entropy_policy"]["n"] == 10
+    assert (
+        meta["monte_carlo_policy"]["num_generations"] == 10 and meta["monte_carlo_policy"]["uqlm_mode"] == "white_box"
+    )
+    assert meta["agents"]["num_runs"] == RUNS and meta["packages"]["uqlm"] and meta["base_seed"] == cfg.project.seed
     assert store.read_json("config.json")["model"]["name"] == "Qwen/Qwen2.5-7B-Instruct"
-
-    assert meta["backends"]["plan"]["default"]["generation_backend"] == "transformers"
 
     calls = model.calls
     ExperimentRunner(FakeDataset(), engines.factory, release=engines.release).run()
-    assert model.calls == calls and model.score_calls == 0
+    assert engines.all[-1].calls == 0 and model.calls == calls  # resume: every run is kept
 
 
-@pytest.mark.parametrize(("backend", "scoring"), [("vllm", "same"), ("vllm", "transformers")])
-def test_backend_modes(config, set_settings, tmp_path, fake_capabilities, backend, scoring):
-    """vLLM-only and hybrid (vLLM generation, Transformers scoring) produce the same downstream pipeline."""
-    set_settings(_config(config, tmp_path, backend, scoring))
+def test_vllm_generation_measures_with_the_same_engine(config, set_settings, tmp_path, fake_capabilities):
+    set_settings(_config(config, tmp_path, "vllm", "same"))
     engines = Engines()
     runner = ExperimentRunner(FakeDataset(), engines.factory, release=engines.release)
     runner.run()
-    gen = next(e for e in engines.all if e.name == "vllm")
-    summary = runner.store.read_json("summary.json")
-    assert summary["models"]["spn"]["auroc"] > 0.9 and 0 < summary["accuracy"] < 1
+    assert engines.events == [("load", "vllm", ["vllm"]), ("release", ["vllm"])]
     feats = runner.store.read_json(f"{runner.scored_dir()}/features.json")
-    assert len(feats) == 100 and all(len(r["features"]) == 8 for r in feats)
-    rec = runner.store.read_json(f"{runner.scored_dir()}/steps/{feats[0]['problem_id'].replace('/', '__')}.json")
-    step = rec["trajectory"]["agents"][0]["steps"][0]
-    if scoring == "same":
-        assert [e[:2] for e in engines.events] == [("load", "vllm")]
-        assert gen.score_calls == 0 and step["scored_by"] == gen.scorer_id
-    else:
-        tf = next(e for e in engines.all if e.name == "transformers")
-        assert engines.events == [
-            ("load", "vllm", ["vllm"]),
-            ("release", ["vllm"]),
-            ("load", "transformers", ["transformers"]),
-        ]
-        assert gen.closed and tf.score_calls > 0 and step["scored_by"] == tf.scorer_id
-        raw = runner.store.read_json(
-            f"{runner.generation_dir()}/trajectories/{feats[0]['problem_id'].replace('/', '__')}.json"
-        )
-        assert raw["trajectory"]["agents"][0]["steps"][0]["token_logprobs"] is None
-    assert (
-        len(step["uq_details"]["se_samples"]["texts"]) == 10 and step["uq_details"]["se_samples"]["backend"] == "vllm"
-    )
+    assert len(feats) == 100 * RUNS and all(len(r["features"]) == 8 for r in feats)
+    step = _run(runner, feats[0]["problem_id"], 0)["trajectory"]["agents"][0]["steps"][0]
+    assert step["scored_by"] == engines.all[0].scorer_id and step["uq_details"]["mc_samples"]["backend"] == "vllm"
 
 
-def test_concurrent_problems_give_identical_results(config, set_settings, tmp_path, fake_capabilities):
-    """8 problems in flight (batched model calls) produce exactly the features of the one-at-a-time run."""
+def test_separate_scoring_backend_is_rejected(config, set_settings, tmp_path, fake_capabilities):
+    set_settings(_config(config, tmp_path, "vllm", "transformers"))
+    engines = Engines()
+    with pytest.raises(BackendCapabilityError, match="scoring_backend: same"):
+        ExperimentRunner(FakeDataset(), engines.factory, release=engines.release).run()
+    assert engines.events == []
+
+
+def test_failed_runs_are_recorded_skipped_and_retried(config, set_settings, tmp_path, fake_capabilities):
+    set_settings(_config(config, tmp_path))
+    engines = Engines()
+    runner = ExperimentRunner(FakeDataset(), engines.factory, release=engines.release)
+    model = engines.factory(config.model, "transformers")
+    model.fail_batches_for = {"What is 1+2?"}
+    runner.run(phases=["generate", "score"])
+    failed = _run(runner, "math/train/x/1", 0)
+    assert failed["trajectory"]["termination_reason"] == "error" and "sampling failed" in failed["trajectory"]["error"]
+    assert failed["grade"] is None
+    skipped = runner.store.read_json(f"{runner.scored_dir()}/skipped_runs.json")
+    assert {(s["problem_id"], s["run_id"]) for s in skipped} == {("math/train/x/1", k) for k in range(RUNS)}
+    assert len(runner.store.read_json(f"{runner.scored_dir()}/features.json")) == 100 * RUNS - RUNS
+
+    retry = Engines()
+    ExperimentRunner(FakeDataset(), retry.factory, release=retry.release).run(phases=["generate", "score"])
+    assert _run(runner, "math/train/x/1", 0)["trajectory"]["termination_reason"] == "task_done"
+    assert retry.all[0].calls > 0 and len(runner.store.read_json(f"{runner.scored_dir()}/features.json")) == 100 * RUNS
+
+
+def test_concurrent_runs_give_identical_results(config, set_settings, tmp_path, fake_capabilities):
+    """8 runs in flight (batched model calls, scorers on the main thread) produce exactly the features of the
+    one-at-a-time run."""
     outputs = {}
     for concurrent in (1, 8):
         set_settings(_config(config, tmp_path / f"c{concurrent}", concurrent=concurrent))
@@ -247,5 +304,5 @@ def test_concurrent_problems_give_identical_results(config, set_settings, tmp_pa
         runner = ExperimentRunner(FakeDataset(), engines.factory, release=engines.release)
         runner.run(phases=["generate", "score"])
         rows = runner.store.read_json(f"{runner.scored_dir()}/features.json")
-        outputs[concurrent] = {r["problem_id"]: (r["features"], r["label"]) for r in rows}
-    assert len(outputs[1]) == 100 and outputs[1] == outputs[8]
+        outputs[concurrent] = {(r["problem_id"], r["run_id"]): (r["features"], r["label"]) for r in rows}
+    assert len(outputs[1]) == 100 * RUNS and outputs[1] == outputs[8]

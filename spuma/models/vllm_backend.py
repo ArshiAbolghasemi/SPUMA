@@ -289,6 +289,9 @@ class VLLMBackend:
     def count_tokens(self, text: str) -> int:
         return self.chat.count_tokens(text)
 
+    def encode(self, text: str) -> list[int]:
+        return self.chat.encode(text)
+
     def close(self) -> None:
         llm, self.llm = self.llm, None
         engine_core = getattr(getattr(llm, "llm_engine", None), "engine_core", None)

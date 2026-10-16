@@ -18,7 +18,7 @@ model:
   revision: null
   tokenizer_revision: null
   backend: vllm
-  scoring_backend: transformers
+  scoring_backend: same
   dtype: bfloat16
   enable_thinking: false
   generation:
@@ -34,7 +34,7 @@ model:
 
   vllm:
     max_model_len: 8192
-    gpu_memory_utilization: 0.85
+    gpu_memory_utilization: 0.75
     tensor_parallel_size: 1
     max_logprobs: -1
     enforce_eager: false
@@ -42,25 +42,32 @@ model:
 models: {}
 
 agents:
-  workflow: sequential
+  workflow: feedback
+  num_runs: 10
+  max_rounds: 10
+  completion_token: TASK_DONE
   items:
-    - id: solver
+    - id: mathematician
       model: default
-      role: solver
+      role: master_mathematician
       enabled: true
       system_prompt: >-
-        Solve mathematical problems step by step.
-        Put the final answer in \boxed{}.
-      user_template: "Problem:\n{problem}"
+        You are the Master Mathematician, an expert in mathematical problem-solving. Solve problems
+        accurately, explain your reasoning clearly, and respond to the Curious Math Enthusiast's questions
+        and feedback. Correct mistakes when necessary, maintain conversation context, and present final
+        answers using \boxed{} when appropriate.
+      user_template: "Solve the following mathematical problem:\n\n{problem}"
 
-    - id: reviewer
+    - id: enthusiast
       model: default
-      role: reviewer
+      role: curious_math_enthusiast
       enabled: true
       system_prompt: >-
-        Review mathematical reasoning, verify calculations, correct mistakes, and produce the final answer.
-        Put the final answer in \boxed{}.
-      user_template: "Problem:\n{problem}\n\nProposed solution:\n{previous}\n\nReview it and give the final answer."
+        You are the Curious Math Enthusiast, collaborating with the Master Mathematician. Carefully examine
+        mathematical solutions, ask relevant questions, request clarifications, and provide constructive
+        feedback. Do not solve the problem yourself. When the solution is sufficiently complete and
+        convincing, end your response with TASK_DONE. Otherwise, continue the discussion naturally.
+      user_template: "Original mathematical problem:\n{problem}\n\nLatest response from the Master Mathematician:\n{previous}\n\nReview the response and provide your next question or feedback. If the solution is complete, end with TASK_DONE."
 
 dataset:
   name: math
@@ -72,10 +79,16 @@ dataset:
   test_samples: 500
 
 uncertainty:
-  predictive_entropy:
+  monte_carlo:
+    num_generations: 10
+    temperature: 0.7
+    top_p: 1.0
+    top_k: null
+    max_new_tokens: null
+    length_normalize: true
+
+  monte_carlo_sequence_probability:
     enabled: true
-    full_vocabulary: true
-    distribution: raw_model
 
   semantic_entropy:
     enabled: true
@@ -92,29 +105,33 @@ uncertainty:
     nli_batch_size: 32
     nli_device: null
 
-  nll:
+  semantic_density:
     enabled: true
-    normalize_by_length: true
+    nli_model_name: tasksource/ModernBERT-large-nli
+    nli_max_length: 8000
+    nli_max_tokens: 2048
+    nli_batch_size: 32
+    nli_device: null
 
   token_length:
     enabled: true
 
 aggregation:
-  predictive_entropy: rms
+  monte_carlo_sequence_probability: rms
   semantic_entropy: rms
-  nll: rms
+  semantic_density: rms
   token_length: mean
 
 features:
   order:
-    - solver_pe
-    - solver_se
-    - solver_nll
-    - solver_length
-    - reviewer_pe
-    - reviewer_se
-    - reviewer_nll
-    - reviewer_length
+    - mathematician_mcsp
+    - mathematician_se
+    - mathematician_sd
+    - mathematician_length
+    - enthusiast_mcsp
+    - enthusiast_se
+    - enthusiast_sd
+    - enthusiast_length
 
 spn:
   backend: spflow

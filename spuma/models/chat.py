@@ -9,7 +9,7 @@ import re
 from collections.abc import Sequence
 from typing import Any
 
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
 from spuma.common.utils import stable_hash
 from spuma.models.backend import ParsedOutput
@@ -18,13 +18,15 @@ THINK_RE = re.compile(r"^\s*<think>(.*?)</think>", re.DOTALL)
 
 
 def to_chat_dicts(messages: Sequence[BaseMessage]) -> list[dict[str, Any]]:
-    """LangChain messages (system + user) -> chat-template dicts."""
+    """LangChain messages (system, user, assistant) -> chat-template dicts."""
     out: list[dict[str, Any]] = []
     for m in messages:
         if isinstance(m, SystemMessage):
             out.append({"role": "system", "content": m.content})
         elif isinstance(m, HumanMessage):
             out.append({"role": "user", "content": m.content})
+        elif isinstance(m, AIMessage):
+            out.append({"role": "assistant", "content": m.content})
         else:
             raise TypeError(f"unsupported message type {type(m).__name__}")
     return out

@@ -149,6 +149,10 @@ class ModelBackend(Protocol):
 
     def count_tokens(self, text: str) -> int: ...
 
+    def encode(self, text: str) -> list[int]:
+        """Token ids of `text` (no special tokens), as a continuation for `score`."""
+        ...
+
     def close(self) -> None: ...
 
 
@@ -179,6 +183,4 @@ def generation_logprob_mode(config: ModelConfig) -> LogprobMode:
     uq = get_settings().uncertainty
     if not config.scores_at_generation:
         return "none"
-    if uq.predictive_entropy.enabled:
-        return "full"
-    return "token" if uq.nll.enabled else "none"
+    return "token" if uq.monte_carlo_enabled else "none"

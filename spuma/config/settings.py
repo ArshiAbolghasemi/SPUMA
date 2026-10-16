@@ -29,7 +29,7 @@ from spuma.evaluation.config import EvaluationConfig
 from spuma.experiments.config import ExperimentConfig, ProjectConfig
 from spuma.models.config import GenerationConfig, ModelConfig
 from spuma.spn.config import SPNConfig
-from spuma.uncertainty.config import SAMPLING_FIELDS, AggregationConfig, FeaturesConfig, UncertaintyConfig
+from spuma.uncertainty.config import AggregationConfig, FeaturesConfig, UncertaintyConfig
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SETTINGS_FILE = PROJECT_ROOT / "config" / "config-qwen-math.yaml"
@@ -101,20 +101,14 @@ class Settings:
         return stable_hash({s: data[s] for s in sections} if sections else data)
 
     def generation_fingerprint(self) -> str:
-        """Cache key of the generate phase: trajectories, generation-time scores and semantic-entropy samples."""
-        data = {k: v for k, v in self.to_dict().items() if k in ("project", "agents")}
-        uq = self.uncertainty
+        """Cache key of the generate phase: conversations and their per-step uncertainty (measured inline)."""
+        data = {k: v for k, v in self.to_dict().items() if k in ("project", "agents", "uncertainty")}
         data["models"] = {k: m.generation_fingerprint() for k, m in self.all_models().items()}
-        se = to_plain(uq.semantic_entropy)
-        data["semantic_entropy"] = {k: se[k] for k in SAMPLING_FIELDS}
-        data["scored_metrics"] = [uq.predictive_entropy.enabled, uq.nll.enabled]
         return stable_hash(data)
 
     def scoring_fingerprint(self) -> str:
-        """Cache key of the score phase: scoring engines + UQ, aggregation and feature settings."""
-        data = {k: v for k, v in self.to_dict().items() if k in ("uncertainty", "aggregation", "features")}
-        data["scorers"] = {k: m.fingerprint(m.scoring_kind) for k, m in self.all_models().items()}
-        return stable_hash(data)
+        """Cache key of the feature phase: aggregation and feature settings."""
+        return stable_hash({k: v for k, v in self.to_dict().items() if k in ("aggregation", "features")})
 
 
 def load_settings(

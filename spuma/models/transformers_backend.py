@@ -212,6 +212,9 @@ class TransformersBackend:
     def count_tokens(self, text: str) -> int:
         return self.chat.count_tokens(text)
 
+    def encode(self, text: str) -> list[int]:
+        return self.chat.encode(text)
+
     def close(self) -> None:
         del self.model
         gc.collect()

@@ -14,7 +14,7 @@ def test_math_experiment_is_registered_with_its_settings():
     math = registry.EXPERIMENTS["math"]
     settings = math.activate()
     assert settings.experiment.name == "ma_qwen_math" and settings.dataset.name == "math"
-    assert [a.id for a in settings.agents.enabled] == ["solver", "reviewer"]
+    assert [a.id for a in settings.agents.enabled] == ["mathematician", "enthusiast"]
 
 
 @dataclasses.dataclass(frozen=True)
