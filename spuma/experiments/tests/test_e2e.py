@@ -16,7 +16,7 @@ from spuma.models.chat import parse_qwen_output, to_chat_dicts
 from spuma.models.tests.fixtures import ALL_CAPABILITIES
 
 ROUNDS = 3
-METRICS = {"mcsp", "se", "sd", "length"}
+METRICS = {"mcsp", "se", "nll", "length"}
 
 
 def _is_wrong(a: int, b: int) -> bool:
@@ -176,7 +176,7 @@ def test_full_pipeline(config, set_settings, tmp_path, fake_capabilities):
     store = runner.store
     assert engines.events == [("load", "transformers", ["transformers"]), ("release", ["transformers"])]
     model = engines.all[0]
-    assert model.score_calls == 0  # no completion marker to strip with text around it: nothing teacher-forced
+    assert model.score_calls == 0
 
     summary = store.read_json("summary.json")
     assert summary["n"] == 30 and 0 < summary["accuracy"] < 1
@@ -207,10 +207,8 @@ def test_full_pipeline(config, set_settings, tmp_path, fake_capabilities):
     assert "se_samples" not in first["uq_details"] and 0 <= first["metrics"]["se"]
     mc = first["uq_details"]["mc_samples"]
     assert len(mc["texts"]) == len(mc["token_logprobs"]) == 10 and len(set(mc["seeds"])) == 10
-    assert 0 < first["metrics"]["mcsp"] <= 1 and 0 <= first["metrics"]["sd"] <= 1
-    assert (
-        first["metrics"]["length"] == len(first["token_ids"]) and first["uq_details"]["sd"]["nli_prompt"] == "problem"
-    )
+    assert 0 < first["metrics"]["mcsp"] <= 1 and first["metrics"]["nll"] > 0 and "sd" not in first["uq_details"]
+    assert first["metrics"]["length"] == len(first["token_ids"]) and first["uq_details"]["nll"]["normalized_by_length"]
     done = enthusiast["steps"][-1]
     assert done["text"] == "TASK_DONE" and done["uq_details"]["view"]["marker_only_texts"] == 11
     progress_log = store.read_jsonl(
@@ -246,7 +244,7 @@ def test_full_pipeline(config, set_settings, tmp_path, fake_capabilities):
 
     calls = model.calls
     ExperimentRunner(FakeDataset(), engines.factory, release=engines.release).run()
-    assert engines.all[-1].calls == 0 and model.calls == calls  # resume: every problem is kept
+    assert engines.all[-1].calls == 0 and model.calls == calls
 
 
 def test_vllm_generation_measures_with_the_same_engine(config, set_settings, tmp_path, fake_capabilities):

@@ -16,7 +16,7 @@ def test_project_config_is_valid(config):
     assert config.model.name == "Qwen/Qwen2.5-7B-Instruct"
     assert config.uncertainty.semantic_entropy.n == 10
     assert config.uncertainty.semantic_entropy.top_k is None
-    assert config.uncertainty.enabled_metrics() == ["mcsp", "se", "sd", "length"]
+    assert config.uncertainty.metrics == ["mcsp", "se", "nll", "length"]
     assert len(config.features.order) == 8
     assert config.model.scoring_backend == "same"
     agents = config.agents
@@ -75,6 +75,20 @@ def test_cache_fingerprints_split_generation_and_features(config):
     assert rms.scoring_fingerprint() != config.scoring_fingerprint()
 
 
+def test_metric_flags_choose_what_is_computed_and_must_match_the_features(raw_config):
+    assert raw_config["uncertainty"]["semantic_density"]["enabled"] is False
+    for section in ("monte_carlo_sequence_probability", "semantic_entropy", "nll", "token_length"):
+        raw_config["uncertainty"][section]["enabled"] = False
+    with pytest.raises(ValueError, match="at least one metric"):
+        Settings.from_dict(raw_config)
+    raw_config["uncertainty"]["token_length"]["enabled"] = True
+    raw_config["uncertainty"]["semantic_density"]["enabled"] = True
+    with pytest.raises(ValueError, match="features.order"):
+        Settings.from_dict(raw_config)
+    raw_config["features"]["order"] = [f"{a}_{m}" for a in ("mathematician", "enthusiast") for m in ("sd", "length")]
+    assert Settings.from_dict(raw_config).uncertainty.metrics == ["sd", "length"]
+
+
 def test_semantic_entropy_must_match_the_shared_samples(raw_config):
     raw_config["uncertainty"]["monte_carlo"]["num_generations"] = 5
     with pytest.raises(ValueError, match="semantic_entropy.n must equal uncertainty.monte_carlo.num_generations"):
@@ -97,7 +111,7 @@ def test_feedback_workflow_settings_are_validated(raw_config):
 
 
 def test_removed_uncertainty_sections_rejected(raw_config):
-    for removed in ("predictive_entropy", "nll"):
+    for removed in ("predictive_entropy", "metrics"):
         raw_config["uncertainty"][removed] = {"enabled": True}
         with pytest.raises(ValueError, match=removed):
             Settings.from_dict(raw_config)
@@ -158,12 +172,7 @@ def test_unknown_key_rejected(raw_config):
 
 def test_semantic_entropy_is_uqlm_only(raw_config, config):
     se = config.uncertainty.semantic_entropy
-    assert (
-        se.backend == "uqlm"
-        and se.nli_model_name == "tasksource/ModernBERT-large-nli"
-        and se.nli_max_tokens == 2048
-        and se.n == 10
-    )
+    assert se.backend == "uqlm" and se.nli_model_name == "tasksource/ModernBERT-large-nli" and se.nli_max_tokens == 2048
     for removed in ("native", "math_equivalence"):
         raw_config["uncertainty"]["semantic_entropy"]["backend"] = removed
         with pytest.raises((ValueError, TypeError)):

@@ -4,15 +4,17 @@ from dataclasses import dataclass, field
 
 from spuma.common.config import check_choice, check_range
 
-METRICS = ("mcsp", "se", "sd", "length")
+METRICS = ("mcsp", "se", "sd", "nll", "length")
+SAMPLED_METRICS = ("mcsp", "se", "sd")
 
 
 @dataclass(frozen=True)
 class SemanticEntropyConfig:
-    """Semantic entropy via UQLM (`uqlm.BlackBoxUQ`, scorer `semantic_negentropy`).
+    """White-box semantic entropy via UQLM's `SemanticEntropy` scorer on the shared Monte Carlo samples.
 
-    Sampling (n continuations of each step's frozen context) is done by SPUMA's generation backend; UQLM
-    clusters the step's own text together with those samples using an NLI model.
+    The response and its samples are clustered by meaning (`equivalence`); cluster probabilities are the
+    normalized sums of the members' sequence probabilities under the raw model. The sampling fields must
+    equal `uncertainty.monte_carlo`'s (SE uses those samples).
     """
 
     enabled: bool = True
@@ -70,17 +72,10 @@ class MonteCarloConfig:
 
 
 @dataclass(frozen=True)
-class MonteCarloSequenceProbabilityConfig:
-    """UQLM white-box `monte_carlo_probability`."""
-
-    enabled: bool = True
-
-
-@dataclass(frozen=True)
 class SemanticDensityConfig:
     """UQLM white-box `semantic_density` (Qiu et al., 2024); the NLI model scores response/sample pairs."""
 
-    enabled: bool = True
+    enabled: bool = False
     nli_model_name: str = "tasksource/ModernBERT-large-nli"
     nli_max_length: int = 8000
     nli_max_tokens: int | None = 2048
@@ -95,23 +90,41 @@ class SemanticDensityConfig:
 
 
 @dataclass(frozen=True)
+class MonteCarloSequenceProbabilityConfig:
+    """UQLM white-box `monte_carlo_probability`."""
+
+    enabled: bool = True
+
+
+@dataclass(frozen=True)
+class NLLConfig:
+    """Token NLL of the response: -(1/L) Σ_t log p(y_t)."""
+
+    enabled: bool = True
+
+
+@dataclass(frozen=True)
 class TokenLengthConfig:
     enabled: bool = True
 
 
 @dataclass(frozen=True)
 class UncertaintyConfig:
-    """`uncertainty:` section."""
+    """`uncertainty:` section: one section per per-step metric, each with an `enabled` flag (a disabled metric
+    is not computed), plus the shared Monte Carlo sampling."""
 
-    semantic_entropy: SemanticEntropyConfig = field(default_factory=SemanticEntropyConfig)
     monte_carlo: MonteCarloConfig = field(default_factory=MonteCarloConfig)
     monte_carlo_sequence_probability: MonteCarloSequenceProbabilityConfig = field(
         default_factory=MonteCarloSequenceProbabilityConfig
     )
+    semantic_entropy: SemanticEntropyConfig = field(default_factory=SemanticEntropyConfig)
     semantic_density: SemanticDensityConfig = field(default_factory=SemanticDensityConfig)
+    nll: NLLConfig = field(default_factory=NLLConfig)
     token_length: TokenLengthConfig = field(default_factory=TokenLengthConfig)
 
     def __post_init__(self) -> None:
+        if not self.metrics:
+            raise ValueError("uncertainty: enable at least one metric")
         se, mc = self.semantic_entropy, self.monte_carlo
         if se.enabled:
             shared = {"n": "num_generations", "temperature": "temperature", "top_p": "top_p", "top_k": "top_k"}
@@ -124,22 +137,29 @@ class UncertaintyConfig:
                     )
 
     @property
-    def monte_carlo_enabled(self) -> bool:
-        """The shared Monte Carlo samples (with token log-probs) are needed (MCSP, SE or SD)."""
-        return (
-            self.monte_carlo_sequence_probability.enabled
-            or self.semantic_entropy.enabled
-            or self.semantic_density.enabled
-        )
-
-    def enabled_metrics(self) -> list[str]:
+    def metrics(self) -> list[str]:
+        """The enabled metrics, in `METRICS` order."""
         flags = {
             "mcsp": self.monte_carlo_sequence_probability.enabled,
             "se": self.semantic_entropy.enabled,
             "sd": self.semantic_density.enabled,
+            "nll": self.nll.enabled,
             "length": self.token_length.enabled,
         }
         return [m for m in METRICS if flags[m]]
+
+    @property
+    def monte_carlo_enabled(self) -> bool:
+        """The shared Monte Carlo samples (with token log-probs) are needed (MCSP, SE or SD enabled)."""
+        return any(m in self.metrics for m in SAMPLED_METRICS)
+
+    @property
+    def token_logprobs_needed(self) -> bool:
+        """Raw token log-probs of the responses are needed (a sampled metric or NLL enabled)."""
+        return self.monte_carlo_enabled or "nll" in self.metrics
+
+    def enabled_metrics(self) -> list[str]:
+        return self.metrics
 
 
 @dataclass(frozen=True)
@@ -149,6 +169,7 @@ class AggregationConfig:
     monte_carlo_sequence_probability: str = "rms"
     semantic_entropy: str = "rms"
     semantic_density: str = "rms"
+    nll: str = "rms"
     token_length: str = "mean"
 
     def for_metric(self, metric: str) -> str:
@@ -156,6 +177,7 @@ class AggregationConfig:
             "mcsp": self.monte_carlo_sequence_probability,
             "se": self.semantic_entropy,
             "sd": self.semantic_density,
+            "nll": self.nll,
             "length": self.token_length,
         }[metric]
 

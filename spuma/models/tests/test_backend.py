@@ -73,23 +73,16 @@ def test_fingerprints_separate_engines_and_generation():
     assert scorer_id(base, "transformers").startswith("transformers:")
 
 
-def test_generation_logprob_mode(config, set_settings):
-    """The shared samples (MCSP, SE, SD) need the raw log-prob of each generated token, never the full
-    distribution; with only token length there is nothing to score."""
+def test_generation_logprob_mode(config, with_metrics):
+    """Enabled MCSP, SE, SD or NLL need the raw log-prob of each generated token (never the full distribution);
+    with only token length there is nothing to score."""
     same = dataclasses.replace(config.model, backend="transformers", scoring_backend="same")
     assert generation_logprob_mode(same) == "token"
     hybrid = dataclasses.replace(config.model, **{"backend": "vllm", "scoring_backend": "transformers"})
     assert generation_logprob_mode(hybrid) == "none"
-    uq = config.uncertainty
-    no_mc = dataclasses.replace(
-        uq,
-        monte_carlo_sequence_probability=dataclasses.replace(uq.monte_carlo_sequence_probability, enabled=False),
-        semantic_density=dataclasses.replace(uq.semantic_density, enabled=False),
-        semantic_entropy=dataclasses.replace(uq.semantic_entropy, enabled=False),
-    )
-    features = dataclasses.replace(config.features, order=[f for f in config.features.order if f.endswith("_length")])
-    set_settings(dataclasses.replace(config, uncertainty=no_mc, features=features))
-    assert generation_logprob_mode(same) == "none"
+    for metrics, mode in ((["length"], "none"), (["nll", "length"], "token")):
+        with_metrics(metrics)
+        assert generation_logprob_mode(same) == mode
 
 
 @pytest.fixture

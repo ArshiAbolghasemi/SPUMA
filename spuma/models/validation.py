@@ -36,9 +36,9 @@ def execution_plan() -> dict[str, dict[str, Any]]:
         )
         entry["agents"].append(agent.id)
         gen = entry["generation_requires"]
-        if uq.semantic_entropy.enabled or uq.monte_carlo_enabled:
-            gen |= {"multiple_completions", "batch_generation"}
         if uq.monte_carlo_enabled:
+            gen |= {"multiple_completions", "batch_generation"}
+        if uq.token_logprobs_needed:
             gen |= {"generated_token_logprobs", "teacher_forced_scoring"}
     return plan
 
@@ -50,7 +50,7 @@ def validate_backends() -> dict[str, dict[str, Any]]:
     problems = []
     for key, entry in plan.items():
         model = config.all_models()[key]
-        if config.uncertainty.monte_carlo_enabled and not model.scores_at_generation:
+        if config.uncertainty.token_logprobs_needed and not model.scores_at_generation:
             problems.append(
                 f"model {key!r}: uncertainty is measured right after each response with the generating engine; "
                 "set model.scoring_backend: same"

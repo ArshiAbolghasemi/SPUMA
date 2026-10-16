@@ -7,7 +7,6 @@ import pytest
 from uqlm.nli.nli import NLI
 
 from spuma.agents.trajectory import AgentTrace, StepRecord, Trajectory
-from spuma.config import get_settings
 from spuma.models.backend import BackendCapabilities, BackendCapabilityError
 from spuma.uncertainty.aggregation import aggregate_agent, mean, rms
 from spuma.uncertainty.equivalence import AnswerAwareNLI
@@ -19,12 +18,10 @@ from spuma.uncertainty.estimators import (
     MonteCarloSequenceProbability,
     SemanticDensity,
     SemanticEntropy,
-    SemanticSampler,
     StepUncertainty,
     TokenLength,
     build_view,
     monte_carlo_seeds,
-    semantic_seeds,
     step_metric_rows,
 )
 from spuma.uncertainty.features import extract_features
@@ -64,59 +61,24 @@ def with_uq(config, set_settings):
     return install
 
 
-def _sampled(backend, step=None):
-    step = step or _step()
-    SemanticSampler(backend).sample_steps([step])
-    return step
+def _se(response, samples, lp=-0.5):
+    """White-box SE with equal per-token log-probs: every text equally probable, so p_c = |c| / (n + 1)."""
+    return SemanticEntropy().from_logprobs(response, samples, [lp] * 3, [[lp] * 3 for _ in samples])
 
 
-def test_semantic_entropy_uses_uqlm_on_step_text_plus_samples(scripted_backend_cls, rule_nli, with_uq):
+def test_semantic_entropy_is_uqlm_white_box_on_response_plus_samples(rule_nli, with_uq):
     with_uq("semantic_entropy", equivalence="nli")
     samples = ["\\boxed{2}"] * 5 + ["so it is 2.0"] * 2 + ["\\boxed{3}"] * 2 + [UNBOXED]
-    backend = scripted_backend_cls([], samples={"": samples})
-    step = _sampled(backend)
-    value, details = SemanticEntropy().estimate(step)
+    value, details = _se("t", samples)
     p = [1 / 11, 8 / 11, 2 / 11]
     assert value == pytest.approx(-sum(x * math.log(x) for x in p))
     assert details["semantic_negentropy"] == pytest.approx(1 - value / math.log(11))
+    assert details["uqlm_scorer"] == "semantic_entropy (tokenprob)"
     assert ("t", "\\boxed{2}") in rule_nli.pairs
-    calls = backend.calls
-    assert len(calls) == 10 and all(c.n == 1 and c.prompt_ids == step.prompt_ids for c in calls)
-    assert all(c.params.top_k is None and c.logprobs == "none" for c in calls)
-    stored = step.uq_details["se_samples"]
-    assert stored["seeds"] == [c.seed for c in calls] == semantic_seeds(step) and len(set(stored["seeds"])) == 10
-    assert stored["policy"]["nli_model"] and stored["texts"] == samples
-    assert step.token_ids == [1, 2, 3, 4] and step.text == "t"
 
 
-def test_semantic_samples_are_cached_and_batched(scripted_backend_cls, set_settings):
-    backend = scripted_backend_cls([], samples={"": ["\\boxed{4}"] * 10})
-    sampler = SemanticSampler(backend)
-    steps = [_step(step_id=0), _step(step_id=1)]
-    sampler.sample_steps(steps)
-    sampler.sample_steps(steps)
-    assert len(backend.calls) == 20 and not any(sampler.needs_samples(s) for s in steps)
-    seeds = [s.uq_details["se_samples"]["seeds"] for s in steps]
-    assert not set(seeds[0]) & set(seeds[1]) and seeds[0] == semantic_seeds(steps[0])
-    expected = -(1 / 11 * math.log(1 / 11) + 10 / 11 * math.log(10 / 11))
-    assert SemanticEntropy().estimate(steps[0])[0] == pytest.approx(expected)
-    uq = get_settings().uncertainty
-    set_settings(
-        dataclasses.replace(
-            get_settings(),
-            uncertainty=dataclasses.replace(
-                uq,
-                semantic_entropy=dataclasses.replace(uq.semantic_entropy, temperature=1.0),
-                monte_carlo=dataclasses.replace(uq.monte_carlo, temperature=1.0),
-            ),
-        )
-    )
-    assert SemanticSampler(backend).needs_samples(steps[0])
-
-
-def test_semantic_entropy_from_fixed_texts_is_backend_independent():
-    """Fixed texts give the same SE whichever backend sampled them; all agree -> 0."""
-    value, details = SemanticEntropy().from_texts("so x = 4, \\boxed{4}", ["\\boxed{4}"] * 10)
+def test_semantic_entropy_is_zero_when_all_texts_agree():
+    value, details = _se("so x = 4, \\boxed{4}", ["\\boxed{4}"] * 10)
     assert value == pytest.approx(0.0) and details["semantic_negentropy"] == pytest.approx(1.0)
 
 
@@ -124,9 +86,6 @@ def test_length_known_value_and_missing_tokens_raise():
     assert TokenLength().estimate(_step())[0] == 4
     with pytest.raises(MissingScoresError):
         TokenLength().estimate(_step(ids=(), lps=(), ents=()))
-
-
-# --- Monte Carlo samples, MCSP and SD (UQLM white-box) -------------------------------------------------------
 
 
 def _mc_sampled(backend, step=None):
@@ -214,13 +173,47 @@ def test_step_uncertainty_measures_four_metrics_with_scorers_on_the_main_thread(
     uq = StepUncertainty(lambda agent: backend, lambda fn, *a: served.append(fn.__name__) or fn(*a))
     step = _step(text="so \\boxed{2}", scored_by=backend.scorer_id)
     result = uq.measure(step, "What is 1+1?")
-    assert list(result["metrics"]) == ["mcsp", "se", "sd", "length"] and served == ["_scores"]
-    assert result["metrics"]["se"] == pytest.approx(0.0) and result["metrics"]["sd"] == pytest.approx(1.0)
+    assert list(result["metrics"]) == ["mcsp", "se", "nll", "length"] and served == ["_scores"]
+    assert result["metrics"]["se"] == pytest.approx(0.0) and result["metrics"]["nll"] == pytest.approx(0.25)
     assert 0 < result["metrics"]["mcsp"] <= 1 and result["metrics"]["length"] == 4
-    assert {"mcsp", "se", "sd", "view"} <= set(result["details"])
+    assert {"mcsp", "se", "view"} <= set(result["details"]) and "sd" not in result["details"] and uq.sd is None
     assert "se_samples" not in step.uq_details and len(step.uq_details[MC_SAMPLES_KEY]["texts"]) == 10
-    assert len(backend.calls) == 10  # one shared set of 10 seeded samples for MCSP, SE and SD
+    assert len(backend.calls) == 10
     assert step.metrics == {}
+
+
+def test_pipeline_se_is_white_box_tokenprob_entropy(scripted_backend_cls):
+    """SE weights its clusters by the texts' sequence probabilities (UQLM tokenprob), not by counting texts."""
+    samples = ["\\boxed{2}"] * 6 + ["\\boxed{3}"] * 4
+    backend = scripted_backend_cls([], samples={"": samples})
+    step = _mc_sampled(backend, _step(text="so \\boxed{2}", scored_by=backend.scorer_id))
+    step.uq_details[MC_SAMPLES_KEY]["token_logprobs"] = [
+        [-0.1] * len(t) if "2" in t else [-2.0] * len(t) for t in samples
+    ]
+    view = build_view(step, backend, None)
+    value, details = SemanticEntropy().from_logprobs(view.text, view.mc_texts, view.token_logprobs, view.mc_logprobs)
+    p2 = _seq_prob(LPS) + 6 * math.exp(-0.1)
+    p3 = 4 * math.exp(-2.0)
+    q = [p2 / (p2 + p3), p3 / (p2 + p3)]
+    assert value == pytest.approx(-sum(x * math.log(x) for x in q))
+    assert details["uqlm_scorer"] == "semantic_entropy (tokenprob)"
+
+
+def test_enabling_sd_computes_it_and_disabled_metrics_are_skipped(with_metrics, scripted_backend_cls, rule_nli):
+    with_metrics(["sd", "length"])
+    backend = scripted_backend_cls([], samples={"": ["\\boxed{2}"] * 10})
+    uq = StepUncertainty(lambda agent: backend)
+    result = uq.measure(_step(text="so \\boxed{2}", scored_by=backend.scorer_id), "What is 1+1?")
+    assert list(result["metrics"]) == ["sd", "length"] and result["metrics"]["sd"] == pytest.approx(1.0)
+    assert uq.mcsp is None and uq.se is None
+
+
+def test_length_only_draws_no_samples_and_needs_no_logprobs(with_metrics, scripted_backend_cls):
+    with_metrics(["length"])
+    backend = scripted_backend_cls([])
+    step = _step(lps=None, ents=None)
+    assert StepUncertainty(lambda agent: backend).measure(step, "q")["metrics"] == {"length": 4.0}
+    assert backend.calls == [] and MC_SAMPLES_KEY not in step.uq_details
 
 
 def test_one_semantic_entropy_and_density_scorer_per_measurement_engine(config, monkeypatch, scripted_backend_cls):
@@ -235,35 +228,23 @@ def test_one_semantic_entropy_and_density_scorer_per_measurement_engine(config, 
 
 
 @pytest.mark.nli
-def test_real_deberta_nli_clusters_paraphrases(with_uq):
-    """Real BlackBoxUQ + DeBERTa-MNLI: paraphrases of one answer score lower SE than two different answers."""
-    with_uq("semantic_entropy", n=3)
-    se = SemanticEntropy()
-    same, _ = se.from_texts(
+def test_real_nli_semantic_entropy_clusters_paraphrases(with_uq, with_metrics):
+    """Real UQLM SemanticEntropy + the configured NLI model: paraphrases of one answer score lower SE than
+    two different answers."""
+    with_uq("monte_carlo", num_generations=3)
+    same, _ = _se(
         "Subtracting 3 from both sides gives 2x = 4, so x = 2.",
         ["The answer is x = 2.", "x equals 2.", "Solving gives x = 2."],
     )
-    mixed, _ = se.from_texts("x = 2.", ["x = 2.", "x = 7.", "x = 7."])
+    mixed, _ = _se("x = 2.", ["x = 2.", "x = 7.", "x = 7."])
     assert same < mixed and mixed > 0
 
 
-def test_semantic_entropy_requires_stored_samples():
-    with pytest.raises(MissingScoresError, match="generate phase"):
-        SemanticEntropy().estimate(_step())
-
-
-def test_sampler_requires_multiple_completions():
-    backend = type("B", (), {"name": "nosample", "capabilities": BackendCapabilities()})()
-    with pytest.raises(BackendCapabilityError):
-        SemanticSampler(backend)
-
-
-def test_semantic_entropy_rejects_short_sample_list(scripted_backend_cls):
-    backend = scripted_backend_cls([], samples={"": ["\\boxed{1}"] * 3})
-    real = backend.generate_batch
-    backend.generate_batch = lambda requests: [[] if i == 9 else r for i, r in enumerate(real(requests))]
-    with pytest.raises(MissingScoresError):
-        _sampled(backend)
+def test_semantic_entropy_needs_n_samples_with_logprobs():
+    with pytest.raises(MissingScoresError, match="exactly n=10"):
+        _se("t", ["\\boxed{1}"] * 3)
+    with pytest.raises(MissingScoresError, match="exactly n=10"):
+        SemanticEntropy().from_logprobs("t", ["\\boxed{1}"] * 10, [-0.1], [[-0.1]] * 3)
 
 
 @pytest.mark.nli
@@ -294,7 +275,7 @@ def _trajectory():
         steps = [_step(agent=agent, step_id=i, round=i + 1, metrics=m) for i, m in enumerate(metrics_list)]
         return AgentTrace(agent_id=agent, role=agent, model="m", steps=steps)
 
-    m = lambda mc, se, sd, ln: {"mcsp": mc, "se": se, "sd": sd, "length": ln}  # noqa: E731
+    m = lambda mc, se, nll, ln: {"mcsp": mc, "se": se, "nll": nll, "length": ln}  # noqa: E731
     return Trajectory(
         problem_id="p1",
         problem="q",
@@ -311,7 +292,8 @@ def test_features_are_four_metrics_per_agent(config):
     assert list(feats) == config.features.order and len(feats) == 8
     assert feats["mathematician_mcsp"] == pytest.approx(math.sqrt((0.09 + 0.16) / 2))
     assert feats["mathematician_length"] == 20
-    assert feats["enthusiast_se"] == 1 and feats["enthusiast_sd"] == pytest.approx(0.5)
+    assert feats["enthusiast_se"] == 1 and feats["enthusiast_nll"] == pytest.approx(0.5)
+    assert feats["mathematician_nll"] == pytest.approx(math.sqrt((0.16 + 0.36) / 2))
 
 
 def test_step_metric_rows_carry_agent_and_round():
@@ -364,7 +346,7 @@ def test_answer_aware_equivalence_uses_math_verify_then_nli(rule_nli):
         + [UNBOXED] * 2
         + ["ran out of tokens at step 7", "ran out of tokens at step 9"]
     )
-    value, details = SemanticEntropy().from_texts(step, samples)
+    value, details = _se(step, samples)
     p = [5 / 11, 2 / 11, 2 / 11, 1 / 11, 1 / 11]
     assert value == pytest.approx(-sum(x * math.log(x) for x in p))
     assert details["equivalence"] == "answer_aware"

@@ -105,12 +105,15 @@ uncertainty:
     nli_device: null
 
   semantic_density:
-    enabled: true
+    enabled: false
     nli_model_name: tasksource/ModernBERT-large-nli
     nli_max_length: 8000
     nli_max_tokens: 2048
     nli_batch_size: 32
     nli_device: null
+
+  nll:
+    enabled: true
 
   token_length:
     enabled: true
@@ -119,17 +122,18 @@ aggregation:
   monte_carlo_sequence_probability: rms
   semantic_entropy: rms
   semantic_density: rms
+  nll: rms
   token_length: mean
 
 features:
   order:
     - mathematician_mcsp
     - mathematician_se
-    - mathematician_sd
+    - mathematician_nll
     - mathematician_length
     - enthusiast_mcsp
     - enthusiast_se
-    - enthusiast_sd
+    - enthusiast_nll
     - enthusiast_length
 
 spn:

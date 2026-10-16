@@ -15,9 +15,9 @@ from spuma.uncertainty import estimators
 class RuleNLI:
     """Stand-in for uqlm.nli.NLI with the same interface: "entailment" iff both texts end in the same number.
 
-    UQLM's BlackBoxUQ, clustering and entropy code run unchanged on top of it; only the DeBERTa download
-    is avoided. `predict_batch` gives semantic density the same rule as probabilities
-    (entailment 1 or contradiction 1).
+    UQLM's white-box scorers (semantic entropy clustering, semantic density) run unchanged on top of it; only
+    the NLI model download is avoided. `predict_batch` gives the same rule as probabilities (entailment 1 or
+    contradiction 1).
     """
 
     label_mapping = ["contradiction", "neutral", "entailment"]

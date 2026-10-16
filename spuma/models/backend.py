@@ -183,4 +183,4 @@ def generation_logprob_mode(config: ModelConfig) -> LogprobMode:
     uq = get_settings().uncertainty
     if not config.scores_at_generation:
         return "none"
-    return "token" if uq.monte_carlo_enabled else "none"
+    return "token" if uq.token_logprobs_needed else "none"
