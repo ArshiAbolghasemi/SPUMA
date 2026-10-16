@@ -108,6 +108,13 @@ def test_top_k_disabled_by_default(tiny_backend, mocker):
     assert spy.call_args.kwargs["top_k"] == 0
 
 
+def test_seeded_n_samples_are_distinct_and_reproducible(tiny_backend):
+    request = GenerationRequest(_prompt(tiny_backend), SAMPLE, seed=3, n=10)
+    texts = [r.text for r in tiny_backend.generate(request)]
+    assert len(set(texts)) > 1
+    assert [r.text for r in tiny_backend.generate(request)] == texts
+
+
 def test_n_samples_need_temperature(tiny_backend):
     with pytest.raises(ValueError):
         tiny_backend.generate(GenerationRequest(_prompt(tiny_backend), GREEDY, seed=0, n=2))

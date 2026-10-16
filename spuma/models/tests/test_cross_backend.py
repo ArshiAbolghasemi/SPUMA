@@ -89,3 +89,17 @@ def test_real_vllm_qwen3_8b_sampling_and_logprobs():
     (main,) = backend.generate(GenerationRequest(prompt, params, seed=1, logprobs="full"))
     assert len(main.token_entropies) == main.num_tokens and all(lp <= 0 for lp in main.token_logprobs)
     release_backends()
+
+
+@pytest.mark.vllm
+def test_real_vllm_seeded_n_samples_are_distinct():
+    cfg = ModelConfig(
+        name="Qwen/Qwen3-0.6B",
+        vllm=VLLMBackendConfig(max_model_len=1024, gpu_memory_utilization=0.4, enforce_eager=True),
+    )
+    backend = get_backend(cfg, "vllm")
+    prompt = backend.render([HumanMessage("Write one sentence about the number 7.")])
+    params = GenerationConfig(temperature=0.7, top_p=1.0, max_new_tokens=32)
+    texts = [r.text for r in backend.generate(GenerationRequest(prompt, params, seed=0, n=10))]
+    release_backends()
+    assert len(texts) == 10 and len(set(texts)) > 1
