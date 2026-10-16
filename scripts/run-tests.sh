@@ -20,9 +20,6 @@ done
 if (( all )); then
     export SPUMA_TESTS_ALL=1
 else
-    # Default: exclude tests that need a GPU or a model download (a later -m from the caller wins).
     args=(-m 'not gpu and not vllm and not nli' ${args[@]+"${args[@]}"})
 fi
-# --no-sync: a plain `uv run` re-syncs without extras and would strip torch.
-# ${args[@]+...}: an empty array is "unbound" under `set -u` in macOS's bash 3.2.
 exec uv run --no-sync --active python -m pytest ${args[@]+"${args[@]}"}

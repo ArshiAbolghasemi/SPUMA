@@ -160,15 +160,14 @@ def test_full_pipeline(config, set_settings, tmp_path, fake_capabilities):
     runner = ExperimentRunner(FakeDataset(), engines.factory, release=engines.release)
     runner.run()
     store = runner.store
-    assert [e[:2] for e in engines.events] == [("load", "transformers")]  # one engine shared by both agents
+    assert [e[:2] for e in engines.events] == [("load", "transformers")]
     model = engines.all[0]
-    assert model.score_calls == 0  # scored at generation time (scoring_backend: same)
+    assert model.score_calls == 0
 
     summary = store.read_json("summary.json")
     assert summary["n"] == 30 and 0 < summary["accuracy"] < 1
     assert summary["models"]["spn"]["auroc"] > 0.9
     assert summary["models"]["spn"]["auarc"] > summary["accuracy"]
-    # the configured risk models: the joint SPN and the class-conditional baseline, each with its posterior entropy
     names = {"spn", "spn_class_conditional"}
     assert set(summary["models"]) == names | {f"{n}_posterior_entropy" for n in names}
 
@@ -176,7 +175,6 @@ def test_full_pipeline(config, set_settings, tmp_path, fake_capabilities):
     feats = store.read_json(f"{d}/features.json")
     assert len(feats) == 100 and list(feats[0]["features"]) == cfg.features.order
 
-    # trajectories: one step per agent, SE sampled from that step's exact context
     pid = feats[0]["problem_id"].replace("/", "__")
     rec = store.read_json(f"{d}/steps/{pid}.json")
     solver = rec["trajectory"]["agents"][0]
@@ -201,7 +199,6 @@ def test_full_pipeline(config, set_settings, tmp_path, fake_capabilities):
 
     assert meta["backends"]["plan"]["default"]["generation_backend"] == "transformers"
 
-    # resume: nothing is regenerated or rescored
     calls = model.calls
     ExperimentRunner(FakeDataset(), engines.factory, release=engines.release).run()
     assert model.calls == calls and model.score_calls == 0
@@ -226,7 +223,6 @@ def test_backend_modes(config, set_settings, tmp_path, fake_capabilities, backen
         assert gen.score_calls == 0 and step["scored_by"] == gen.scorer_id
     else:
         tf = next(e for e in engines.all if e.name == "transformers")
-        # staged: vLLM loads, is released, and only then Transformers loads, alone on the "GPU"
         assert engines.events == [
             ("load", "vllm", ["vllm"]),
             ("release", ["vllm"]),
@@ -236,7 +232,7 @@ def test_backend_modes(config, set_settings, tmp_path, fake_capabilities, backen
         raw = runner.store.read_json(
             f"{runner.generation_dir()}/trajectories/{feats[0]['problem_id'].replace('/', '__')}.json"
         )
-        assert raw["trajectory"]["agents"][0]["steps"][0]["token_logprobs"] is None  # vLLM did not score
+        assert raw["trajectory"]["agents"][0]["steps"][0]["token_logprobs"] is None
     assert (
         len(step["uq_details"]["se_samples"]["texts"]) == 10 and step["uq_details"]["se_samples"]["backend"] == "vllm"
     )

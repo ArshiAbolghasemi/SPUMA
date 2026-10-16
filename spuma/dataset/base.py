@@ -19,8 +19,8 @@ class Problem:
     problem_id: str
     problem: str
     reference_solution: str
-    split: str  # train | validation | test
-    metadata: dict[str, Any] = field(default_factory=dict)  # dataset-specific (subject, level, ...)
+    split: str
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class DatasetProvider(Protocol):
@@ -35,8 +35,8 @@ class Grade:
     predicted: str | None
     reference: str | None
     correct: bool
-    label: int  # 1 = incorrect
-    parse_failure: bool  # no extractable final answer
+    label: int
+    parse_failure: bool
     reference_parse_failure: bool
     method: str
 

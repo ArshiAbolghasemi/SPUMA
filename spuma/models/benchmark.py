@@ -92,7 +92,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.config:
-        os.environ[SETTINGS_FILE_ENV] = args.config  # read by the first get_settings() call
+        os.environ[SETTINGS_FILE_ENV] = args.config
     config = get_settings()
     setup_logging("benchmark")
     problems = get_dataset().load()["test"][: args.problems]
@@ -112,7 +112,7 @@ def main() -> None:
         result = benchmark_backend(backend, prompts)
         logger.info("benchmark", extra=result)
         results.append(result)
-        release_backends()  # the next engine gets the whole GPU
+        release_backends()
     store = FileArtifactStore(PROJECT_ROOT / config.experiment.output_dir / config.experiment.name)
     path = store.write_json(f"benchmark-{datetime.now(UTC):%Y%m%dT%H%M%S}.json", results)
     logger.info("benchmark written", extra={"path": str(path)})

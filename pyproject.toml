@@ -4,45 +4,30 @@ version = "0.1.0"
 description = "SPUMA: Sum-Product Network for Multi-Agent Uncertainty Quantification"
 readme = "README.md"
 requires-python = ">=3.14"
-# torch is NOT listed here: pick exactly one hardware extra, e.g.
-#   uv sync --extra cu128     (Linux GPU)
-#   uv sync --extra mps       (Apple Silicon)
-#   uv sync --extra cpu       (CPU-only)
-# (scripts/install-dependencies.sh picks it for you.)
-# uqlm provides semantic-entropy clustering (NLI). Every uqlm release (<=0.6.7) caps transformers<5 and
-# datasets<5; [tool.uv] override-dependencies lifts those caps (the NLI path is verified by the tests).
 dependencies = [
     "datasets>=5.1.0",
-    "dvc[s3]>=3.67.1", # 2.x resolves silently when 3.x is blocked, and breaks with current fsspec
+    "dvc[s3]>=3.67.1",
     "dynaconf>=3.3.5",
     "langchain-core>=1.6.9",
     "langgraph>=1.2.14",
-    "math-verify[antlr4-9-3]>=0.9.0", # antlr 4.9.3: dvc 3 -> hydra-core pins antlr4-python3-runtime==4.9.*
-    "numpy>=2.3.0", # vllm (via numba) needs <2.5
+    "math-verify[antlr4-9-3]>=0.9.0",
+    "numpy>=2.3.0",
     "pydantic>=2.14.0",
     "python-dotenv>=1.2.1",
     "pyyaml>=6.0.3",
     "scikit-learn>=1.9.1",
     "spflow>=1.1.0",
     "tqdm>=4.67",
-    "transformers>=5.10.4,<5.18", # see override-dependencies (uqlm, vllm)
-    "uqlm==0.6.7", # caps transformers/datasets <5: see override-dependencies
+    "transformers>=5.10.4,<5.18",
+    "uqlm==0.6.7",
 ]
 
 [project.optional-dependencies]
-# Each pin is the newest wheel on its index that ships CPython 3.14 (cp314) builds.
-# CUDA 12.6 — Pascal (P100), Volta (V100), Turing (T4, RTX 20xx), Ampere, Ada
 cu126 = ["torch==2.14.1"]
-# CUDA 12.8 — Ampere, Ada, Hopper (H100). The cu128 index stops at 2.11.0.
 cu128 = ["torch==2.11.0"]
-# CUDA 13.0 — Blackwell (RTX 50xx, B100/B200) and newer; drops Maxwell/Pascal
 cu130 = ["torch==2.14.1"]
-# CPU-only (Linux) for local dev or non-GPU nodes
 cpu = ["torch==2.14.1"]
-# Apple Silicon — the standard PyPI wheel includes the MPS backend
 mps = ["torch==2.14.1"]
-# vLLM (Linux + NVIDIA). Brings its own pinned torch (2.13.0, PyPI CUDA build), so it replaces
-# the cuXXX extras rather than combining with them: `uv sync --extra vllm`.
 vllm = ["vllm==0.31.0; sys_platform == 'linux' and platform_machine in 'x86_64 aarch64'", "torch==2.13.0"]
 
 [dependency-groups]
@@ -59,7 +44,6 @@ build-backend = "uv_build"
 
 [tool.uv.build-backend]
 module-root = ""
-# Tests sit inside the package; keep them out of the built wheel.
 wheel-exclude = ["**/tests", "**/tests/**", "**/conftest.py"]
 
 [tool.uv]
@@ -74,9 +58,6 @@ conflicts = [
     ],
 ]
 override-dependencies = [
-    # uqlm 0.6.7 pins transformers<5 / datasets<5; the SemanticEntropy + NLI code it is used for runs on 5.x.
-    # Overrides replace every requirement on the package, so vllm 0.31's own <5.18 cap is restated here
-    # (all extras then share one transformers version, i.e. identical tokenizers across backends).
     "transformers>=5.10.4,<5.18",
     "datasets>=5.1.0",
 ]
@@ -85,8 +66,6 @@ environments = [
     "sys_platform == 'darwin'",
 ]
 
-# On Linux, each extra pulls torch from its PyTorch index; on macOS every
-# extra falls back to PyPI (which is the only source of MPS/CPU mac wheels).
 [tool.uv.sources]
 torch = [
     { index = "pytorch-cu126", extra = "cu126", marker = "sys_platform == 'linux'" },
@@ -116,8 +95,7 @@ url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
 [tool.pytest.ini_options]
-testpaths = ["spuma"]  # tests live next to their code: spuma/<package>/tests/
-# shared fixtures live with the package they belong to (spuma/<package>/tests/fixtures.py), loaded for every test
+testpaths = ["spuma"]
 addopts = [
     "-p", "spuma.common.tests.fixtures",
     "-p", "spuma.config.tests.fixtures",
@@ -139,8 +117,8 @@ line-length = 120
 target-version = "py314"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "T20", "PLC0415"]  # T20: no print(); PLC0415: imports at the top of the file
+select = ["E", "F", "I", "UP", "B", "T20", "PLC0415"]
 
 [tool.ruff.lint.per-file-ignores]
-"**/tests/**" = ["E501"]  # literal model outputs / tool payloads
+"**/tests/**" = ["E501"]
 "**/conftest.py" = ["E501"]

@@ -47,12 +47,12 @@ from spuma.models.backend import (
 from spuma.models.chat import ChatFormatter
 from spuma.models.config import GenerationConfig, ModelConfig
 
-try:  # vLLM is optional (Linux + NVIDIA): without it, capabilities_for() reports it as not installed
+try:
     from vllm import LLM, SamplingParams
     from vllm.inputs import TokensPrompt
 except ImportError:
     LLM = SamplingParams = TokensPrompt = None
-try:  # engine teardown helpers; absent in some vLLM layouts
+try:
     from vllm.distributed.parallel_state import destroy_distributed_environment, destroy_model_parallel
 except ImportError:
     destroy_distributed_environment = destroy_model_parallel = None
@@ -77,9 +77,9 @@ class VLLMBackend:
         missing = [f for f in REQUIRED_SAMPLING_FIELDS if f not in _sampling_fields(SamplingParams)]
         if missing:
             raise BackendCapabilityError(f"installed vLLM {_version()} lacks SamplingParams fields {missing}")
-        try:  # the exact parameter values this backend sends must validate on the installed version
+        try:
             SamplingParams(top_k=0, logprobs=-1, flat_logprobs=True, detokenize=False, seed=0)
-        except Exception as e:  # noqa: BLE001 - any validation error means the semantics differ
+        except Exception as e:  # noqa: BLE001
             raise BackendCapabilityError(f"installed vLLM {_version()} rejects required sampling params: {e}") from e
         full = config.vllm.max_logprobs == -1
         return BackendCapabilities(
@@ -108,7 +108,6 @@ class VLLMBackend:
         self.TokensPrompt = tokens_prompt_cls
         self.capabilities = self.capabilities_for(config)
         self.scorer_id = scorer_id(config, "vllm")
-        # Size of the model's output distribution (lm-head rows), which can exceed len(tokenizer).
         self.engine_vocab_size = engine_vocab_size or llm.llm_engine.model_config.get_vocab_size()
         self.info = BackendInfo(
             backend=self.name,
@@ -125,7 +124,7 @@ class VLLMBackend:
 
     @classmethod
     def from_config(cls, config: ModelConfig) -> VLLMBackend:
-        cls.capabilities_for(config)  # fail fast before allocating the GPU
+        cls.capabilities_for(config)
         vc = config.vllm
         tokenizer_revision = config.tokenizer_revision or config.revision
         start = time.perf_counter()
@@ -155,8 +154,6 @@ class VLLMBackend:
         )
         return cls(llm, tokenizer, config, SamplingParams, TokensPrompt)
 
-    # --- parameter translation -------------------------------------------------------------------
-
     def sampling_params(self, params: GenerationConfig, n: int, seed: int, logprobs: LogprobMode) -> Any:
         kw: dict[str, Any] = {
             "n": n,
@@ -166,7 +163,6 @@ class VLLMBackend:
             "flat_logprobs": True,
         }
         if params.do_sample:
-            # vLLM 0.31: top_k=0 disables top-k (Transformers also uses 0; older vLLM used -1).
             kw |= {"temperature": params.temperature, "top_p": params.top_p, "top_k": params.top_k or 0}
         else:
             if n > 1:
@@ -176,7 +172,7 @@ class VLLMBackend:
             self._require_full("full-vocabulary generation log-probs")
             kw["logprobs"] = -1
         elif logprobs == "token":
-            kw["logprobs"] = 0  # just the sampled token
+            kw["logprobs"] = 0
         return self.SamplingParams(**kw)
 
     def _require_full(self, what: str) -> None:
@@ -184,8 +180,6 @@ class VLLMBackend:
             raise BackendCapabilityError(
                 f"{what} need model.vllm.max_logprobs: -1 (got {self.config.vllm.max_logprobs})"
             )
-
-    # --- generation ------------------------------------------------------------------------------
 
     def render(self, messages: Sequence[BaseMessage]) -> list[int]:
         return self.chat.render(messages)
@@ -232,8 +226,6 @@ class VLLMBackend:
             latency_s=latency,
         )
 
-    # --- scoring ---------------------------------------------------------------------------------
-
     def score(self, prompt_ids: list[int], token_ids: list[int], full_vocabulary: bool) -> TokenScores:
         start = time.perf_counter()
         if not token_ids:
@@ -261,7 +253,6 @@ class VLLMBackend:
         positions = list(_positions(output.prompt_logprobs))
         if len(positions) != total:
             raise BackendCapabilityError(f"vLLM returned {len(positions)} prompt log-prob rows for {total} tokens")
-        # Row i holds the distribution that predicted prompt token i; the continuation starts at len(prompt_ids).
         lps, ents = self._extract(iter(positions[len(prompt_ids) :]), token_ids, full_vocabulary)
         return TokenScores(lps, ents, self.scorer_id, time.perf_counter() - start)
 
@@ -282,7 +273,6 @@ class VLLMBackend:
         return lps, (ents if full else None)
 
     def _entropy(self, ids: np.ndarray, vals: np.ndarray, position: int) -> float:
-        # The sampled/prompt token is listed first and again inside the full distribution: dedupe by id.
         _, first = np.unique(ids, return_index=True)
         if len(first) != self.engine_vocab_size:
             raise BackendCapabilityError(
@@ -292,8 +282,6 @@ class VLLMBackend:
         lp = vals[first]
         p = np.exp(lp)
         return float(-np.sum(np.where(p > 0, p * lp, 0.0)))
-
-    # --- text ------------------------------------------------------------------------------------
 
     def parse(self, text: str) -> ParsedOutput:
         return self.chat.parse(text)

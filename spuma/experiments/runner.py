@@ -87,19 +87,14 @@ class ExperimentRunner:
         self.store = FileArtifactStore(PROJECT_ROOT / config.experiment.output_dir / config.experiment.name)
         self.run_id = f"{datetime.now(UTC):%Y%m%dT%H%M%S}-{uuid.uuid4().hex[:6]}"
 
-    # --- layout ----------------------------------------------------------------------------------
-
     def generation_dir(self) -> str:
         return f"generation-{get_settings().generation_fingerprint()}"
 
     def scored_dir(self) -> str:
         return f"{self.generation_dir()}/scored-{get_settings().scoring_fingerprint()}"
 
-    # --- driver ----------------------------------------------------------------------------------
-
     def run(self, phases: list[str] | None = None, limit: int | None = None) -> None:
         phases = phases or list(PHASES)
-        # Fail before loading any model if a backend cannot provide what this experiment needs.
         plan = validate_backends()
         self.store.write_json("config.json", get_settings().sanitized())
         self.store.write_json(f"runs/{self.run_id}.json", self.metadata(phases, limit, plan))
@@ -163,8 +158,6 @@ class ExperimentRunner:
             },
         }
 
-    # --- phases ----------------------------------------------------------------------------------
-
     def write_splits(self, limit: int | None) -> None:
         splits = self.dataset.load()
         if limit is not None:
@@ -202,7 +195,7 @@ class ExperimentRunner:
         concurrency = get_settings().experiment.concurrent_problems
         backends = self._backends()
         batchers: dict[int, MicroBatcher] = {}
-        if concurrency > 1:  # one batcher per engine, shared by the agents that use it
+        if concurrency > 1:
             backends = {a: batchers.setdefault(id(b), MicroBatcher(b)) for a, b in backends.items()}
         se_enabled = get_settings().uncertainty.semantic_entropy.enabled
         samplers = {a: SemanticSampler(b) for a, b in backends.items()} if se_enabled else {}
@@ -229,7 +222,6 @@ class ExperimentRunner:
         logger.info("generate", extra={"pending": len(pending), "already_done": done, "concurrent": concurrency})
 
         def run_problem(problem: Problem, trajectory: Trajectory | None) -> Trajectory:
-            # Worker thread: model calls only. Only the id and the problem text enter the workflow.
             if trajectory is None:
                 trajectory = workflow.run(problem.problem_id, problem.problem)
             for trace in trajectory.agents:
@@ -250,7 +242,7 @@ class ExperimentRunner:
                     extra={"split": split, "index": i, "problem_id": problem.problem_id, "label": grade["label"]},
                 )
         finally:
-            pool.shutdown(wait=True, cancel_futures=True)  # on an error, drop the problems not started yet
+            pool.shutdown(wait=True, cancel_futures=True)
             for batcher in batchers.values():
                 batcher.stop()
 

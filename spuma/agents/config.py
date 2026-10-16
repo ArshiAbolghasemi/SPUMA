@@ -16,9 +16,8 @@ class AgentConfig:
     system_prompt: str
     model: str = "default"
     enabled: bool = True
-    # Rendered with {problem} and, for later agents, {previous} (earlier agents' final messages).
     user_template: str = "{problem}"
-    generation: GenerationConfig | None = None  # None: the model's generation settings
+    generation: GenerationConfig | None = None
 
     def __post_init__(self) -> None:
         key = f"agents.items[{self.id}]"

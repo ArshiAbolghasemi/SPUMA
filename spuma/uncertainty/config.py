@@ -5,7 +5,6 @@ from dataclasses import dataclass, field
 from spuma.common.config import check_choice, check_range
 
 METRICS = ("pe", "se", "nll", "length")
-# Semantic-entropy fields that change the drawn samples (the rest only changes how they are clustered).
 SAMPLING_FIELDS = ("enabled", "n", "temperature", "top_p", "top_k", "max_new_tokens")
 
 
@@ -13,7 +12,7 @@ SAMPLING_FIELDS = ("enabled", "n", "temperature", "top_p", "top_k", "max_new_tok
 class PredictiveEntropyConfig:
     enabled: bool = True
     full_vocabulary: bool = True
-    distribution: str = "raw_model"  # untempered, untruncated p_theta(.|context)
+    distribution: str = "raw_model"
 
     def __post_init__(self) -> None:
         if self.full_vocabulary is not True:
@@ -34,16 +33,14 @@ class SemanticEntropyConfig:
     n: int = 10
     temperature: float = 0.7
     top_p: float = 1.0
-    top_k: None = None  # top-k truncation is always disabled for semantic sampling
-    max_new_tokens: int | None = None  # None: the agent's max_new_tokens
-    # when two of a step's texts are "the same": answer_aware = equivalent \boxed{} answers (math-verify) when
-    # both texts box one, the NLI model otherwise; nli = the NLI model for every pair
+    top_k: None = None
+    max_new_tokens: int | None = None
     equivalence: str = "answer_aware"
-    nli_model_name: str = "tasksource/ModernBERT-large-nli"  # any 3-way NLI model (labels mapped by name)
-    nli_max_length: int = 8000  # characters kept per text (UQLM truncates longer ones, with a warning)
-    nli_max_tokens: int | None = 2048  # tokens per (premise, hypothesis) pair; None: the model's own limit
+    nli_model_name: str = "tasksource/ModernBERT-large-nli"
+    nli_max_length: int = 8000
+    nli_max_tokens: int | None = 2048
     nli_batch_size: int = 32
-    nli_device: str | None = None  # None: UQLM's choice (CUDA, then MPS, then CPU)
+    nli_device: str | None = None
 
     def __post_init__(self) -> None:
         key = "uncertainty.semantic_entropy"

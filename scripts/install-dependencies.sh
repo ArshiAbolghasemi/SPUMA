@@ -9,10 +9,7 @@
 # is enough, since torch wheels bundle their own CUDA runtime.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-# Distro Pythons (/usr/lib/python3.x) can break torch's source introspection; use uv's own build.
 export UV_PYTHON_PREFERENCE=only-managed
-# torch and vLLM wheels are GBs, and a caching mirror (Artifactory, Nexus) fetches an uncached file from
-# upstream before it sends a byte; uv's 30 s default read timeout gives up first.
 export UV_HTTP_TIMEOUT=${UV_HTTP_TIMEOUT:-1800}
 
 vllm=0
@@ -56,14 +53,10 @@ fi
 args=(--extra "$extra")
 
 if [[ -n "$index" ]]; then
-    # `uv sync` would re-lock for every platform and CUDA extra, which needs download.pytorch.org.
-    # Install only this machine's packages instead: every package at its uv.lock version, from the
-    # mirror, with PyPI's own torch build. A dependency already pins the lock's torch, so the cuXXX/cpu/mps
-    # paths prune it (and its CUDA wheels) from the export and install their own pin.
     torch=""
     case "$extra" in
-        vllm) export_args=(--extra vllm) ;;  # its torch pin is PyPI's CUDA build already
-        cu128)  # PyPI's Linux torch is CUDA 13 from 2.11; 2.10.0 is its last CUDA 12.8 build
+        vllm) export_args=(--extra vllm) ;;
+        cu128)
             export_args=(--prune torch); torch=torch==2.10.0
             echo "note: the driver predates CUDA 13, so using PyPI torch 2.10.0 (CUDA 12.8), not the cu128 extra's 2.11.0" >&2 ;;
         cu126) echo "PyPI has no CUDA 12.6 torch build: update the driver to CUDA >= 12.8" >&2; exit 1 ;;

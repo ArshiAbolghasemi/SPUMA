@@ -40,7 +40,7 @@ def main(argv: list[str] | None = None) -> int:
     for name in args.experiment or list(EXPERIMENTS):
         try:
             EXPERIMENTS[name].run(phases=args.phase, limit=args.limit)
-        except Exception:  # noqa: BLE001 - one failing experiment must not stop the others
+        except Exception:  # noqa: BLE001
             logger.exception("experiment failed", extra={"experiment": name})
             failed.append(name)
     if failed:

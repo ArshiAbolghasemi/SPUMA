@@ -43,12 +43,11 @@ def compare(t_backend, v_backend, prompt_ids, continuation):
 def test_offline_vllm_path_matches_transformers(tiny_backend, vllm_backend):
     msgs = [SystemMessage("sys"), HumanMessage("Solve 2x+3=7")]
     prompt = tiny_backend.render(msgs)
-    assert vllm_backend.render(msgs) == prompt  # identical tokenization and chat template
+    assert vllm_backend.render(msgs) == prompt
     assert vllm_backend.info.compatibility_key() == tiny_backend.info.compatibility_key()
     continuation = tiny_backend.chat.encode("The answer is \\boxed{2}.") + [tiny_backend.chat.tokenizer.eos_token_id]
     t, v, stats = compare(tiny_backend, vllm_backend, prompt, continuation)
     assert stats["max_dlogp"] < 1e-5 and stats["max_dH"] < 1e-5
-    # aggregation over steps is consistent too
     assert rms([np.mean(t.token_entropies), 1.0]) == pytest.approx(rms([np.mean(v.token_entropies), 1.0]), abs=1e-6)
 
 

@@ -16,7 +16,7 @@ class GenerationConfig:
 
     temperature: float = 0.7
     top_p: float = 1.0
-    top_k: int | None = None  # None/0 = disabled (no top-k truncation)
+    top_k: int | None = None
     max_new_tokens: int = 2048
 
     def __post_init__(self) -> None:
@@ -36,7 +36,6 @@ class TransformersBackendConfig:
 
     device: str = "auto"
     attn_implementation: str = "sdpa"
-    # Rows of the full-vocabulary softmax processed at once during scoring (GPU memory bound).
     scoring_chunk_size: int = 256
 
     def __post_init__(self) -> None:
@@ -53,7 +52,6 @@ class VLLMBackendConfig:
     max_model_len: int | None = 8192
     gpu_memory_utilization: float = 0.85
     tensor_parallel_size: int = 1
-    # -1 = whole vocabulary; required for full-vocabulary PE from vLLM (see README for the cost).
     max_logprobs: int = -1
     enforce_eager: bool = False
 
@@ -70,10 +68,8 @@ class ModelConfig:
 
     name: str = "Qwen/Qwen2.5-7B-Instruct"
     revision: str | None = None
-    tokenizer_revision: str | None = None  # None: same as `revision`
-    backend: str = "transformers"  # generation (agents + semantic-entropy sampling)
-    # PE/NLL scoring: `same` scores at generation time with `backend`; a different kind re-scores the
-    # saved prompt/continuation token ids teacher-forced in a later, separately loaded stage.
+    tokenizer_revision: str | None = None
+    backend: str = "transformers"
     scoring_backend: str = "same"
     dtype: str = "bfloat16"
     enable_thinking: bool = False

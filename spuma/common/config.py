@@ -57,9 +57,7 @@ def build_config[T](cls: type[T], raw: Mapping[str, Any] | T | None, path: str =
     missing = [
         f.name
         for f in fields
-        if raw.get(f.name) is None  # absent or null
-        and f.default is dataclasses.MISSING
-        and f.default_factory is dataclasses.MISSING
+        if raw.get(f.name) is None and f.default is dataclasses.MISSING and f.default_factory is dataclasses.MISSING
     ]
     if missing:
         raise ValueError(f"missing required setting(s): {', '.join(path + k for k in missing)}")
@@ -79,9 +77,6 @@ def to_plain(value: Any) -> Any:
     if isinstance(value, Path):
         return str(value)
     return value
-
-
-# --- validators for __post_init__ ------------------------------------------------------------------
 
 
 def check_choice(key: str, value: Any, choices: Iterable[Any]) -> None:

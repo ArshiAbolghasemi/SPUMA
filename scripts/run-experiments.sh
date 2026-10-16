@@ -7,5 +7,4 @@
 #   scripts/run-experiments.sh --list                                   # registered experiments
 set -euo pipefail
 cd "$(dirname "$0")/.."
-# --no-sync: a plain `uv run` re-syncs without extras and would strip torch
 exec uv run --no-sync --active python -m spuma.experiments "$@"

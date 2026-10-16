@@ -59,7 +59,7 @@ class TransformersBackend:
     def capabilities_for(config: ModelConfig) -> BackendCapabilities:
         return BackendCapabilities(
             generation=True,
-            batch_generation=True,  # requests run sequentially; the n samples of one request are batched
+            batch_generation=True,
             multiple_completions=True,
             generated_token_logprobs=True,
             full_vocabulary_logprobs=True,
@@ -119,8 +119,6 @@ class TransformersBackend:
     def device(self) -> torch.device:
         return next(self.model.parameters()).device
 
-    # --- generation ------------------------------------------------------------------------------
-
     def render(self, messages: Sequence[BaseMessage]) -> list[int]:
         return self.chat.render(messages)
 
@@ -139,7 +137,7 @@ class TransformersBackend:
             inputs,
             attention_mask=torch.ones_like(inputs),
             do_sample=params.do_sample,
-            top_k=params.top_k or 0,  # Transformers: 0 disables top-k (also overrides the model's default)
+            top_k=params.top_k or 0,
             max_new_tokens=params.max_new_tokens,
             num_return_sequences=n,
             pad_token_id=self.pad_id,
@@ -180,12 +178,10 @@ class TransformersBackend:
     def _trim(self, row: list[int]) -> tuple[list[int], bool]:
         for i, t in enumerate(row):
             if t in self.eos_ids:
-                return row[: i + 1], True  # the EOS token is model-generated: keep it
+                return row[: i + 1], True
             if t == self.pad_id:
-                return row[:i], True  # padding after another sequence's EOS
+                return row[:i], True
         return row, False
-
-    # --- scoring ---------------------------------------------------------------------------------
 
     @torch.inference_mode()
     def score(self, prompt_ids: list[int], token_ids: list[int], full_vocabulary: bool) -> TokenScores:
@@ -193,7 +189,6 @@ class TransformersBackend:
         if not token_ids:
             return TokenScores([], [] if full_vocabulary else None, self.scorer_id)
         ids = torch.tensor([prompt_ids + token_ids], device=self.device)
-        # Logits at positions len(prompt)-1 .. end-1 predict the continuation tokens.
         logits = self.model(ids, logits_to_keep=len(token_ids) + 1).logits[0, :-1]
         target = torch.tensor(token_ids, device=self.device)
         size = self.config.transformers.scoring_chunk_size
@@ -203,15 +198,13 @@ class TransformersBackend:
             lps.append(chunk.gather(1, target[s : s + chunk.shape[0], None]).squeeze(1))
             if full_vocabulary:
                 probs = chunk.exp()
-                ents.append(-torch.where(probs > 0, probs * chunk, 0.0).sum(-1))  # 0·log0 = 0
+                ents.append(-torch.where(probs > 0, probs * chunk, 0.0).sum(-1))
         return TokenScores(
             token_logprobs=torch.cat(lps).tolist(),
             token_entropies=torch.cat(ents).tolist() if full_vocabulary else None,
             scorer=self.scorer_id,
             latency_s=time.perf_counter() - start,
         )
-
-    # --- text ------------------------------------------------------------------------------------
 
     def parse(self, text: str) -> ParsedOutput:
         return self.chat.parse(text)

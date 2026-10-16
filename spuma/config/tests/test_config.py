@@ -55,10 +55,8 @@ def test_cache_fingerprints_split_generation_and_scoring(config):
     vllm_only = dataclasses.replace(
         config, model=dataclasses.replace(config.model, backend="vllm", scoring_backend="same")
     )
-    # same generator, but `same` scores while generating and hybrid does not: different trajectories
     assert hybrid.generation_fingerprint() != vllm_only.generation_fingerprint()
     assert hybrid.scoring_fingerprint() != vllm_only.scoring_fingerprint()
-    # changing only a scoring-engine setting keeps the generation cache
     chunked = dataclasses.replace(hybrid.model.transformers, **{"scoring_chunk_size": 64})
     tweaked = dataclasses.replace(hybrid, model=dataclasses.replace(hybrid.model, **{"transformers": chunked}))
     assert tweaked.generation_fingerprint() == hybrid.generation_fingerprint()
@@ -76,7 +74,7 @@ def test_get_settings_is_cached_until_cleared(monkeypatch):
     first = get_settings()
     assert get_settings() is first
     monkeypatch.setenv("SPUMA_DATASET__TEST_SAMPLES", "3")
-    assert get_settings().dataset.test_samples == first.dataset.test_samples  # cached
+    assert get_settings().dataset.test_samples == first.dataset.test_samples
     get_settings.cache_clear()
     assert get_settings().dataset.test_samples == 3
 
@@ -134,8 +132,8 @@ def test_semantic_entropy_is_uqlm_only(raw_config, config):
 def test_changing_nli_model_keeps_generation_cache(config):
     se = dataclasses.replace(config.uncertainty.semantic_entropy, **{"nli_model_name": "other/nli"})
     other = dataclasses.replace(config, uncertainty=dataclasses.replace(config.uncertainty, **{"semantic_entropy": se}))
-    assert other.generation_fingerprint() == config.generation_fingerprint()  # samples are reused
-    assert other.scoring_fingerprint() != config.scoring_fingerprint()  # but re-clustered
+    assert other.generation_fingerprint() == config.generation_fingerprint()
+    assert other.scoring_fingerprint() != config.scoring_fingerprint()
 
 
 def test_unknown_model_reference(raw_config):
@@ -153,7 +151,7 @@ def test_sanitized_redacts_secrets(config):
     }
     snap = config.sanitized()
     assert snap["dataset"]["test_samples"] == 500
-    json.dumps(snap)  # JSON-able (paths as strings)
+    json.dumps(snap)
 
 
 def test_dotenv_exported_not_in_config(tmp_path, monkeypatch):

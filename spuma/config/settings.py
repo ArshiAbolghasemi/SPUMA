@@ -35,7 +35,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SETTINGS_FILE = PROJECT_ROOT / "config" / "config-qwen-math.yaml"
 DEFAULT_DOTENV_FILE = PROJECT_ROOT / ".env"
 ENV_PREFIX = "SPUMA"
-SETTINGS_FILE_ENV = "SPUMA_CONFIG_FILE"  # settings file get_settings() loads (CLI --config sets it)
+SETTINGS_FILE_ENV = "SPUMA_CONFIG_FILE"
 SECRET_PATTERN = re.compile(r"token|secret|password|api_?key|credential", re.IGNORECASE)
 
 logger = logging.getLogger(__name__)
@@ -48,7 +48,7 @@ class Settings:
     project: ProjectConfig = field(default_factory=ProjectConfig)
     experiment: ExperimentConfig = field(default_factory=ExperimentConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
-    models: dict[str, ModelConfig] = field(default_factory=dict)  # extra named models; `default` is `model`
+    models: dict[str, ModelConfig] = field(default_factory=dict)
     dataset: DatasetConfig = field(default_factory=DatasetConfig)
     uncertainty: UncertaintyConfig = field(default_factory=UncertaintyConfig)
     aggregation: AggregationConfig = field(default_factory=AggregationConfig)
@@ -76,8 +76,6 @@ class Settings:
                 f"expected {sorted(expected)}, got {order}"
             )
 
-    # --- (de)serialization -----------------------------------------------------------------------
-
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> Settings:
         return build_config(cls, raw)
@@ -89,8 +87,6 @@ class Settings:
         """JSON-able snapshot with anything secret-looking redacted (saved with every run)."""
         return _redact(self.to_dict())
 
-    # --- per-agent lookups -----------------------------------------------------------------------
-
     def all_models(self) -> dict[str, ModelConfig]:
         return {"default": self.model, **self.models}
 
@@ -99,8 +95,6 @@ class Settings:
 
     def generation_for(self, agent: AgentConfig) -> GenerationConfig:
         return agent.generation or self.model_for(agent).generation
-
-    # --- cache keys ------------------------------------------------------------------------------
 
     def fingerprint(self, *sections: str) -> str:
         data = self.to_dict()
@@ -111,7 +105,6 @@ class Settings:
         data = {k: v for k, v in self.to_dict().items() if k in ("project", "agents")}
         uq = self.uncertainty
         data["models"] = {k: m.generation_fingerprint() for k, m in self.all_models().items()}
-        # only the sampling side of SE: changing the NLI model re-clusters stored samples, it does not resample
         se = to_plain(uq.semantic_entropy)
         data["semantic_entropy"] = {k: se[k] for k in SAMPLING_FIELDS}
         data["scored_metrics"] = [uq.predictive_entropy.enabled, uq.nll.enabled]

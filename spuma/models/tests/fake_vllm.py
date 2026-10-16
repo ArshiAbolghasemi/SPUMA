@@ -26,7 +26,7 @@ class SamplingParams:
     detokenize: bool = True
 
     def __post_init__(self):
-        if self.top_k != 0 and self.top_k < 1:  # vLLM 0.31 semantics
+        if self.top_k != 0 and self.top_k < 1:
             raise ValueError(f"top_k must be 0 (disable), or at least 1, got {self.top_k}.")
 
 
@@ -84,7 +84,7 @@ class LLM:
 
     def generate(self, prompts, params, use_tqdm=False):
         out = []
-        if not isinstance(params, list):  # vLLM accepts one SamplingParams for all prompts
+        if not isinstance(params, list):
             params = [params] * len(prompts)
         for prompt, sp in zip(prompts, params, strict=True):
             self.requests.append((prompt, sp))

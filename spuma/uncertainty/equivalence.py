@@ -39,7 +39,7 @@ def answers_equivalent(a: str, b: str) -> bool:
     if normalize(a) == normalize(b):
         return True
     pa, pb = _parsed(a), _parsed(b)
-    if not pa or not pb:  # unparseable: only identical (normalized) answers match
+    if not pa or not pb:
         return False
     return bool(
         verify(pa, pb, timeout_seconds=MATH_VERIFY_TIMEOUT_S) or verify(pb, pa, timeout_seconds=MATH_VERIFY_TIMEOUT_S)
@@ -59,7 +59,7 @@ class AnswerAwareNLI:
     def __init__(self, nli_factory: Callable[[], Any]) -> None:
         self._factory = nli_factory
         self._nli: Any = None
-        self.num_responses: int | None = None  # set by UQLM before each scoring call
+        self.num_responses: int | None = None
         self.counts = {"math_verify": 0, "answer_vs_none": 0, "nli": 0}
 
     @property

@@ -24,9 +24,9 @@ class DatasetConfig:
     hf_path: str = "EleutherAI/hendrycks_math"
     subsets: list[str] = field(default_factory=lambda: list(MATH_SUBJECTS))
     seed: int = 42
-    train_samples: int = 800  # drawn from the official train split
-    validation_samples: int = 200  # drawn from the official train split, disjoint from train
-    test_samples: int = 500  # drawn from the official test split
+    train_samples: int = 800
+    validation_samples: int = 200
+    test_samples: int = 500
 
     def __post_init__(self) -> None:
         check_choice("dataset.name", self.name, ("math",))

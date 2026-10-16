@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 
 from spuma.common.config import check_choice, check_range
 
-# Names registered in spuma.evaluation.risk.RISK_MODELS; extend both when adding a risk model.
 RISK_MODEL_NAMES = ("spn", "spn_class_conditional")
 
 

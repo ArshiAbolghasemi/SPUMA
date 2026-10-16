@@ -23,9 +23,9 @@ from torch import Tensor, nn
 
 @dataclass(frozen=True)
 class LeafSettings:
-    label_smoothing: float  # Laplace pseudo-count per indicator of the binary label leaf
-    bin_smoothing: float  # Laplace pseudo-count per histogram cell
-    edges: dict[int, Tensor]  # histogram bin edges per variable (empty unless histogram leaves are used)
+    label_smoothing: float
+    bin_smoothing: float
+    edges: dict[int, Tensor]
 
 
 _SETTINGS: ContextVar[LeafSettings | None] = ContextVar("spuma_spn_leaf_settings", default=None)
@@ -47,9 +47,6 @@ def _active() -> LeafSettings:
     return settings
 
 
-# --- binary indicator leaf ---------------------------------------------------------------------------
-
-
 class BinaryIndicatorLeaf(LeafModule):
     """One binary variable Y as a sum node over its two indicator leaves (network-polynomial form):
 
@@ -69,15 +66,13 @@ class BinaryIndicatorLeaf(LeafModule):
         smoothing: float | None = None,
         validate_args: bool | None = None,
     ) -> None:
-        if log_weights is not None:  # (F, C, R, 2); the event shape is (F, C, R)
+        if log_weights is not None:
             out_channels, num_repetitions = log_weights.shape[1], log_weights.shape[2]
         super().__init__(scope, out_channels, num_repetitions, validate_args=validate_args)
         self.smoothing = _active().label_smoothing if smoothing is None else float(smoothing)
-        if log_weights is None:  # uniform until fitted
+        if log_weights is None:
             log_weights = torch.full((*self._event_shape, 2), math.log(0.5))
-        self.log_weights = nn.Parameter(
-            torch.as_tensor(log_weights, dtype=torch.float64)
-        )  # (F, C, R, 2): log(1 − θ), log θ
+        self.log_weights = nn.Parameter(torch.as_tensor(log_weights, dtype=torch.float64))
 
     @staticmethod
     def indicators(y: Tensor) -> tuple[Tensor, Tensor]:
@@ -88,9 +83,9 @@ class BinaryIndicatorLeaf(LeafModule):
         return ((y == 1) | missing).to(y.dtype), ((y == 0) | missing).to(y.dtype)
 
     def log_likelihood(self, data: Tensor, cache: object = None) -> Tensor:
-        y = data[:, self.scope.query].to(self.log_weights.dtype)  # (B, F)
+        y = data[:, self.scope.query].to(self.log_weights.dtype)
         pos, neg = self.indicators(y)
-        log_ind = torch.stack([neg, pos], dim=-1).log()  # (B, F, 2), log 0 = -inf
+        log_ind = torch.stack([neg, pos], dim=-1).log()
         return torch.logsumexp(self.log_weights.unsqueeze(0) + log_ind[:, :, None, None, :], dim=-1)
 
     @property
@@ -105,11 +100,11 @@ class BinaryIndicatorLeaf(LeafModule):
         return {"log_weights": self.log_weights}
 
     def _compute_parameter_estimates(self, data: Tensor, weights: Tensor, bias_correction: bool) -> dict[str, Tensor]:
-        y = data[..., 0, 0]  # (N, F)
+        y = data[..., 0, 0]
         if torch.isnan(y).any():
             raise ValueError("the correctness label must be observed for every training row")
-        self.indicators(y)  # validates {0, 1}
-        w = weights  # (N, F, C, R)
+        self.indicators(y)
+        w = weights
         positive = (w * y[:, :, None, None]).sum(0)
         total = w.sum(0)
         theta = (positive + self.smoothing) / (total + 2 * self.smoothing)
@@ -129,9 +124,6 @@ class BinaryIndicatorLeaf(LeafModule):
         )
 
 
-# --- histogram leaf ----------------------------------------------------------------------------------
-
-
 def histogram_edges(values: np.ndarray, bins: int, strategy: str) -> np.ndarray:
     """`bins + 1` strictly increasing edges covering [min, max] of `values` (one feature).
 
@@ -141,7 +133,7 @@ def histogram_edges(values: np.ndarray, bins: int, strategy: str) -> np.ndarray:
     values = np.asarray(values, dtype=np.float64)
     values = values[np.isfinite(values)]
     lo, hi = float(values.min()), float(values.max())
-    if hi - lo < 1e-9:  # constant feature: one small window around the value
+    if hi - lo < 1e-9:
         lo, hi = lo - 0.5, hi + 0.5
     if strategy == "uniform":
         return np.linspace(lo, hi, bins + 1)
@@ -177,7 +169,7 @@ class HistogramLeaf(LeafModule):
         smoothing: float | None = None,
         validate_args: bool | None = None,
     ) -> None:
-        if log_probs is not None:  # (F, C, R, cells); the event shape is (F, C, R)
+        if log_probs is not None:
             out_channels, num_repetitions = log_probs.shape[1], log_probs.shape[2]
         super().__init__(scope, out_channels, num_repetitions, validate_args=validate_args)
         if edges is None:
@@ -190,16 +182,14 @@ class HistogramLeaf(LeafModule):
             raise ValueError("histogram edges must be strictly increasing")
         self.smoothing = _active().bin_smoothing if smoothing is None else float(smoothing)
         self.register_buffer("edges", edges)
-        cells = edges.shape[1] + 1  # B bins + 2 tails
+        cells = edges.shape[1] + 1
         if log_probs is None:
             log_probs = torch.full((*self._event_shape, cells), -math.log(cells))
-        self.log_probs = nn.Parameter(
-            torch.as_tensor(log_probs, dtype=torch.float64)
-        )  # (F, C, R, B + 2): [low tail, bins, high tail]
+        self.log_probs = nn.Parameter(torch.as_tensor(log_probs, dtype=torch.float64))
 
     @property
     def tail_scale(self) -> Tensor:
-        return (self.edges[:, -1] - self.edges[:, 0]) / (self.edges.shape[1] - 1)  # (F,)
+        return (self.edges[:, -1] - self.edges[:, 0]) / (self.edges.shape[1] - 1)
 
     def cells(self, x: Tensor) -> Tensor:
         """Cell index per value: 0 = low tail, 1..B = bins, B + 1 = high tail. x: (N, F)."""
@@ -213,15 +203,14 @@ class HistogramLeaf(LeafModule):
     def log_density(self, x: Tensor) -> Tensor:
         """log f(x) per variable/channel/repetition. x: (N, F) without NaN -> (N, F, C, R)."""
         x = x.to(torch.float64)
-        idx = self.cells(x)  # (N, F)
-        s = self.tail_scale  # (F,)
-        # log of each cell's normalizer: tail scale for the tails, bin width for the bins
-        log_norm = torch.cat([s[:, None], torch.diff(self.edges, dim=1), s[:, None]], dim=1).log()  # (F, cells)
-        log_norm_x = torch.gather(log_norm.expand(x.shape[0], -1, -1), 2, idx[..., None])[..., 0]  # (N, F)
+        idx = self.cells(x)
+        s = self.tail_scale
+        log_norm = torch.cat([s[:, None], torch.diff(self.edges, dim=1), s[:, None]], dim=1).log()
+        log_norm_x = torch.gather(log_norm.expand(x.shape[0], -1, -1), 2, idx[..., None])[..., 0]
         decay = torch.where(idx == 0, self.edges[:, 0] - x, 0.0) + torch.where(
             idx == log_norm.shape[1] - 1, x - self.edges[:, -1], 0.0
         )
-        lp = self.log_probs.unsqueeze(0).expand(x.shape[0], -1, -1, -1, -1)  # (N, F, C, R, cells)
+        lp = self.log_probs.unsqueeze(0).expand(x.shape[0], -1, -1, -1, -1)
         lp_x = torch.gather(lp, 4, idx[:, :, None, None, None].expand(-1, -1, lp.shape[2], lp.shape[3], 1))[..., 0]
         return lp_x - (log_norm_x + decay / s)[:, :, None, None]
 
@@ -229,7 +218,7 @@ class HistogramLeaf(LeafModule):
         x = data[:, self.scope.query].to(torch.float64)
         missing = torch.isnan(x)
         ll = self.log_density(torch.where(missing, self.edges[None, :, 0], x))
-        return torch.where(missing[:, :, None, None], torch.zeros_like(ll), ll)  # NaN: integrated out (= 1)
+        return torch.where(missing[:, :, None, None], torch.zeros_like(ll), ll)
 
     @property
     def _torch_distribution_class(self) -> None:
@@ -244,7 +233,7 @@ class HistogramLeaf(LeafModule):
 
     def _compute_parameter_estimates(self, data: Tensor, weights: Tensor, bias_correction: bool) -> dict[str, Tensor]:
         x = rearrange(data, "n f 1 1 -> n f").to(torch.float64)
-        one_hot = nn.functional.one_hot(self.cells(x), self.log_probs.shape[-1]).to(torch.float64)  # (N, F, cells)
+        one_hot = nn.functional.one_hot(self.cells(x), self.log_probs.shape[-1]).to(torch.float64)
         counts = torch.einsum("nfk,nfcr->fcrk", one_hot, weights.to(torch.float64))
         a = self.smoothing
         probs = (counts + a) / (counts.sum(-1, keepdim=True) + a * counts.shape[-1])

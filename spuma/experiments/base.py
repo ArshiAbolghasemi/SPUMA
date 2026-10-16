@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class Experiment:
-    name: str  # what `--experiment` selects
+    name: str
     config_file: Path
     description: str = ""
 
@@ -45,4 +45,4 @@ class Experiment:
         try:
             runner.run(phases=phases, limit=limit)
         finally:
-            release_backends()  # free the GPU before the next experiment loads its models
+            release_backends()

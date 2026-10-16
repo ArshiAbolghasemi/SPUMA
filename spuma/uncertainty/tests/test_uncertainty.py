@@ -28,7 +28,7 @@ from spuma.uncertainty.estimators import (
 )
 from spuma.uncertainty.features import extract_features
 
-UNBOXED = "Let me check whether x = 2"  # no boxed answer, ends in 2
+UNBOXED = "Let me check whether x = 2"
 
 
 def _step(agent="solver", step_id=0, ids=(1, 2, 3, 4), lps=(-0.1, -0.2, -0.3, -0.4), ents=(1.0, 2.0, 3.0, 4.0), **kw):
@@ -97,23 +97,21 @@ def _sampled(backend, step=None):
 
 
 def test_semantic_entropy_uses_uqlm_on_step_text_plus_samples(scripted_backend_cls, rule_nli, with_uq):
-    # equivalence: nli (rule NLI stand-in); step text "t" has no number, so it forms its own cluster
     with_uq("semantic_entropy", equivalence="nli")
     samples = ["\\boxed{2}"] * 5 + ["so it is 2.0"] * 2 + ["\\boxed{3}"] * 2 + [UNBOXED]
     backend = scripted_backend_cls([], samples={"": samples})
     step = _sampled(backend)
     value, details = SemanticEntropy().estimate(step)
-    # 11 texts: {t}, {2 x5, 2.0 x2, unboxed text ending in "x = 2"}, {3 x2}  ->  1/11, 8/11, 2/11
     p = [1 / 11, 8 / 11, 2 / 11]
     assert value == pytest.approx(-sum(x * math.log(x) for x in p))
     assert details["semantic_negentropy"] == pytest.approx(1 - value / math.log(11))
-    assert ("t", "\\boxed{2}") in rule_nli.pairs  # the step's own text is clustered with its samples
+    assert ("t", "\\boxed{2}") in rule_nli.pairs
     (call,) = backend.calls
     assert call.n == 10 and call.prompt_ids == step.prompt_ids and call.params.top_k is None
-    assert call.logprobs == "none"  # samples are never scored
+    assert call.logprobs == "none"
     stored = step.uq_details["se_samples"]
     assert stored["policy"]["nli_model"]
-    assert step.token_ids == [1, 2, 3, 4] and step.text == "t"  # main trajectory untouched
+    assert step.token_ids == [1, 2, 3, 4] and step.text == "t"
 
 
 def test_semantic_samples_are_cached_and_batched(scripted_backend_cls, with_uq):
@@ -121,12 +119,10 @@ def test_semantic_samples_are_cached_and_batched(scripted_backend_cls, with_uq):
     sampler = SemanticSampler(backend)
     steps = [_step(step_id=0), _step(step_id=1)]
     sampler.sample_steps(steps)
-    sampler.sample_steps(steps)  # already sampled: no new backend calls
+    sampler.sample_steps(steps)
     assert len(backend.calls) == 2 and not any(sampler.needs_samples(s) for s in steps)
-    # step text "t" vs ten identical "\\boxed{4}" samples: clusters 1/11 and 10/11
     expected = -(1 / 11 * math.log(1 / 11) + 10 / 11 * math.log(10 / 11))
     assert SemanticEntropy().estimate(steps[0])[0] == pytest.approx(expected)
-    # a different SE configuration invalidates the stored samples
     with_uq("semantic_entropy", temperature=1.0)
     assert SemanticSampler(backend).needs_samples(steps[0])
 
@@ -151,7 +147,7 @@ def test_trajectory_scored_in_one_uqlm_call(config, scripted_backend_cls, monkey
     real = se.uq.score
     monkeypatch.setattr(se.uq, "score", lambda **kw: calls.append(len(kw["responses"])) or real(**kw))
     score_trajectory(traj, ests, build_token_scorers(lambda m, k: pytest.fail("scored")))
-    assert calls == [3]  # 2 solver steps + 1 reviewer step, one call
+    assert calls == [3]
 
 
 def test_one_nli_model_shared_by_agents(config, monkeypatch):
@@ -159,7 +155,7 @@ def test_one_nli_model_shared_by_agents(config, monkeypatch):
     monkeypatch.setattr("spuma.uncertainty.estimators.load_uqlm_semantic_entropy", lambda: loads.append(1) or object())
     ests = build_estimators()
     se = [e for e in ests["solver"] if e.name == "se"][0]
-    assert se is [e for e in ests["reviewer"] if e.name == "se"][0] and loads == []  # lazy
+    assert se is [e for e in ests["reviewer"] if e.name == "se"][0] and loads == []
     assert se.uq is se.uq and len(loads) == 1
 
 
@@ -206,7 +202,7 @@ def test_token_scorer_rescores_with_other_engine(scripted_backend_cls):
     tf = scripted_backend_cls([], logprob=-0.7)
     step = _step(lps=None, ents=None, scored_by=None, generation_meta={"compat": tf.info.compatibility_key()})
     TokenScorer(tf.scorer_id, lambda: tf, full_vocabulary=True).ensure(step)
-    assert tf.score_calls == [([9, 9], [1, 2, 3, 4], True)]  # exact saved prompt + continuation ids
+    assert tf.score_calls == [([9, 9], [1, 2, 3, 4], True)]
     assert step.scored_by == tf.scorer_id and step.token_logprobs == [-0.7] * 4 and len(step.token_entropies) == 4
     assert NegativeLogLikelihood().estimate(step)[0] == pytest.approx(0.7)
 
@@ -254,7 +250,7 @@ def test_features_order_and_values(config):
     feats = extract_features(_trajectory())
     assert list(feats) == config.features.order
     assert feats["solver_pe"] == pytest.approx(math.sqrt(12.5))
-    assert feats["solver_length"] == 20  # mean, not RMS
+    assert feats["solver_length"] == 20
     assert feats["reviewer_nll"] == 2
 
 
@@ -279,8 +275,8 @@ def test_score_trajectory_and_rows(config, scripted_backend_cls):
     scored = score_trajectory(traj, build_estimators(), scorers)
     rows = step_metric_rows(scored)
     assert set(rows[0]["metrics"]) == {"pe", "se", "nll", "length"}
-    assert traj.agents[0].steps[0].metrics == {}  # input not mutated
-    assert len(backend.calls) == 3  # one 10-sample SE request per step
+    assert traj.agents[0].steps[0].metrics == {}
+    assert len(backend.calls) == 3
 
 
 def _fake_nli(monkeypatch, id2label, probs):
@@ -295,11 +291,10 @@ def _fake_nli(monkeypatch, id2label, probs):
 
 
 def test_label_ordered_nli_maps_any_label_order_to_uqlms(monkeypatch):
-    # ModernBERT-style order: the model says "entailment" with 0.9
     _fake_nli(monkeypatch, {0: "entailment", 1: "neutral", 2: "contradiction"}, [0.9, 0.08, 0.02])
     nli = LabelOrderedNLI(max_tokens=2048, nli_model_name="any")
     assert nli.max_tokens == 2048
-    assert nli.predict_batch([("a", "b")]).tolist() == [[0.02, 0.08, 0.9]]  # UQLM reads column 2 as entailment
+    assert nli.predict_batch([("a", "b")]).tolist() == [[0.02, 0.08, 0.9]]
     _fake_nli(monkeypatch, {0: "yes", 1: "no", 2: "maybe"}, [0.3, 0.3, 0.4])
     with pytest.raises(ValueError, match="lack"):
         LabelOrderedNLI(nli_model_name="any")
@@ -309,17 +304,17 @@ def test_answer_aware_equivalence_uses_math_verify_then_nli(rule_nli):
     """Default `equivalence: answer_aware`: boxed answers by math-verify, unanswered texts by the NLI model."""
     step = "Long derivation ... so the answer is \\boxed{\\frac{1}{2}}"
     samples = (
-        ["Different words entirely, \\boxed{0.5}"] * 3  # same answer, other text: math-verify merges
+        ["Different words entirely, \\boxed{0.5}"] * 3
         + ["\\boxed{1/2}"]
-        + ["Hence \\boxed{2}"] * 2  # a different answer
-        + [UNBOXED] * 2  # no boxed answer: NLI decides (rule NLI: both end in 2 -> same)
-        + ["ran out of tokens at step 7", "ran out of tokens at step 9"]  # NLI: different final numbers
+        + ["Hence \\boxed{2}"] * 2
+        + [UNBOXED] * 2
+        + ["ran out of tokens at step 7", "ran out of tokens at step 9"]
     )
     value, details = SemanticEntropy().from_texts(step, samples)
     p = [5 / 11, 2 / 11, 2 / 11, 1 / 11, 1 / 11]
     assert value == pytest.approx(-sum(x * math.log(x) for x in p))
     assert details["equivalence"] == "answer_aware"
-    assert rule_nli.pairs and all("boxed" not in a + b for a, b in rule_nli.pairs)  # NLI never sees answer pairs
+    assert rule_nli.pairs and all("boxed" not in a + b for a, b in rule_nli.pairs)
 
 
 def test_answer_aware_loads_nli_only_when_needed():

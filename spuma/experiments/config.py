@@ -21,8 +21,6 @@ class ExperimentConfig:
     name: str = "ma_qwen_math"
     output_dir: Path = Path("artifacts")
     resume: bool = True
-    # Problems whose workflows run at the same time in the generate phase. Above 1, their model calls are
-    # micro-batched into shared engine calls (spuma/models/batching.py): the main speedup with vLLM.
     concurrent_problems: int = 1
 
     def __post_init__(self) -> None:

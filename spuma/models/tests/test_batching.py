@@ -19,7 +19,7 @@ class _Engine:
     def generate_batch(self, requests):
         self.threads.add(threading.current_thread().name)
         self.batch_sizes.append(len(requests))
-        time.sleep(0.02)  # engine time, during which more requests queue up
+        time.sleep(0.02)
         if self.fail:
             raise RuntimeError("engine failed")
         return [
@@ -47,9 +47,9 @@ def test_concurrent_calls_are_batched_and_routed():
     for t in threads:
         t.join()
     batcher.stop()
-    assert {s: r[0].seed for s, r in results.items()} == {s: s for s in range(8)}  # each caller gets its own
-    assert sum(engine.batch_sizes) == 8 and len(engine.batch_sizes) < 8  # fewer engine calls than requests
-    assert engine.threads == {"spuma-batcher-fake"}  # the engine is only ever called from one thread
+    assert {s: r[0].seed for s, r in results.items()} == {s: s for s in range(8)}
+    assert sum(engine.batch_sizes) == 8 and len(engine.batch_sizes) < 8
+    assert engine.threads == {"spuma-batcher-fake"}
 
 
 def test_generate_batch_keeps_n_samples_per_request():

@@ -12,8 +12,8 @@ class HistogramConfig:
     """`spn.histogram:` piecewise-constant leaves (edges from the full training data, per feature)."""
 
     bins: int = 10
-    strategy: str = "uniform"  # uniform: equal widths | quantile: equal training mass per bin
-    smoothing: float = 1.0  # Laplace pseudo-count per cell (bins + 2 tails): no cell has probability 0
+    strategy: str = "uniform"
+    smoothing: float = 1.0
 
     def __post_init__(self) -> None:
         check_range("spn.histogram.bins", self.bins, ge=1)
@@ -28,18 +28,14 @@ class SPNConfig:
     backend: str = "spflow"
     target: str = "incorrect"
     seed: int = 42
-    leaf: str = "histogram"  # continuous feature leaves: normal | laplace | histogram
+    leaf: str = "histogram"
     histogram: HistogramConfig = field(default_factory=HistogramConfig)
-    # LearnSPN: k-means row clustering (sum nodes), RDC variable partitioning (product nodes)
     min_instances_slice: int = 50
     min_features_slice: int = 2
     n_clusters: int = 2
     rdc_threshold: float = 0.3
-    # joint SPN: never let a product node split a varying label Y into a block of its own (Y joins the
-    # feature it depends on most); false = plain LearnSPN, which can make P(Y | Z) constant
     keep_label_dependence: bool = True
     standardize: bool = True
-    # Laplace pseudo-count of the label: indicator leaves (joint) / P(Y) (class-conditional)
     prior_smoothing: float = 1.0
 
     def __post_init__(self) -> None:

@@ -40,7 +40,7 @@ class MissingScoresError(RuntimeError):
 
 
 class UncertaintyEstimator(Protocol):
-    name: str  # metric key: pe | se | nll | length
+    name: str
 
     def estimate(self, step: StepRecord) -> tuple[float, dict[str, Any]]:
         """(value, details to persist)."""
@@ -90,9 +90,6 @@ class TokenLength:
         return float(len(step.token_ids)), {}
 
 
-# --- semantic entropy --------------------------------------------------------------------------------
-
-
 def _se() -> SemanticEntropyConfig:
     return get_settings().uncertainty.semantic_entropy
 
@@ -102,7 +99,7 @@ def semantic_params(step: StepRecord) -> GenerationConfig:
     return GenerationConfig(
         temperature=config.temperature,
         top_p=config.top_p,
-        top_k=None,  # no top-k truncation (each backend translates "off")
+        top_k=None,
         max_new_tokens=config.max_new_tokens or step.generation_params["max_new_tokens"],
     )
 
@@ -116,7 +113,7 @@ def semantic_policy() -> dict[str, Any]:
         "clustering": f"uqlm SemanticEntropy, equivalence={config.equivalence}",
         "clustered_texts": "the step's own text + its n samples",
         "nli_model": config.nli_model_name,
-        "nli_prompt": None,  # prompts_in_nli=False: step contexts are long chat transcripts
+        "nli_prompt": None,
         "probabilities": "discrete (cluster frequency)",
     }
 
@@ -214,7 +211,6 @@ def load_uqlm_semantic_entropy() -> Any:
     rest (`AnswerAwareNLI`, which loads the model only when needed). `nli`: the NLI model for every pair.
     """
     nli = AnswerAwareNLI(load_nli) if _se().equivalence == "answer_aware" else load_nli()
-    # llm=None: responses come from SPUMA's backends; UQLM only clusters them (no prompt in the NLI input)
     return UQLMSemanticEntropy(llm=None, use_best=False, prompts_in_nli=False, nli=nli)
 
 
@@ -289,9 +285,6 @@ class SemanticEntropy:
         return out
 
 
-# --- token scoring -----------------------------------------------------------------------------------
-
-
 class TokenScorer:
     """Ensures every step carries raw-model scores from the configured scoring engine.
 
@@ -339,7 +332,7 @@ def build_estimators() -> dict[str, list[UncertaintyEstimator]]:
     """Per-agent estimator lists in metric order (no backend needed: inputs are stored on the steps)."""
     config = get_settings()
     uq = config.uncertainty
-    semantic = SemanticEntropy()  # one NLI model shared by every agent
+    semantic = SemanticEntropy()
     out: dict[str, list[UncertaintyEstimator]] = {}
     for agent in config.agents.enabled:
         ests: list[UncertaintyEstimator] = []
@@ -382,7 +375,6 @@ def score_trajectory(
 ) -> Trajectory:
     """Fill token scores (if needed), `metrics` and `uq_details` of every step; the input is untouched."""
     scored = trajectory.model_copy(deep=True)
-    # Estimators that score many steps at once (UQLM) get every step of the trajectory in one call.
     batched: dict[int, tuple[Any, list[StepRecord]]] = {}
     for trace in scored.agents:
         for est in estimators[trace.agent_id]:

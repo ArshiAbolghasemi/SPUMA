@@ -14,7 +14,7 @@ from spuma.evaluation.metrics import (
 
 def test_risk_coverage_rejects_highest_risk_first():
     y = np.array([0, 1, 0, 1])
-    p = np.array([0.1, 0.9, 0.2, 0.8])  # perfect ranking
+    p = np.array([0.1, 0.9, 0.2, 0.8])
     cov, risk = risk_coverage(y, p)
     assert cov.tolist() == [0.25, 0.5, 0.75, 1.0]
     assert risk.tolist() == pytest.approx([0, 0, 1 / 3, 0.5])
@@ -26,7 +26,6 @@ def test_auarc_ordering_and_ties():
     y = np.array([0, 1, 0, 1])
     good, bad = np.array([0.1, 0.9, 0.2, 0.8]), np.array([0.9, 0.1, 0.8, 0.2])
     assert auarc(y, good) > auarc(y, bad)
-    # all-tied scores: expected risk is the base rate at every coverage
     assert aurc(y, np.zeros(4)) == pytest.approx(0.5)
 
 

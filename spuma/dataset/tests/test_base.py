@@ -61,5 +61,5 @@ def test_normalize():
 
 
 def test_registry():
-    assert isinstance(get_dataset(), MathDataset)  # dataset.name: math
+    assert isinstance(get_dataset(), MathDataset)
     assert isinstance(get_grader(), MathVerifyGrader)

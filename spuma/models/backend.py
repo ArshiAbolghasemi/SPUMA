@@ -17,7 +17,7 @@ from spuma.models.config import BackendKind, GenerationConfig, ModelConfig
 
 logger = logging.getLogger(__name__)
 
-LogprobMode = Literal["none", "token", "full"]  # what to return with each generated token
+LogprobMode = Literal["none", "token", "full"]
 
 
 class BackendCapabilityError(RuntimeError):
@@ -29,10 +29,10 @@ class BackendCapabilities:
     generation: bool = True
     batch_generation: bool = False
     multiple_completions: bool = False
-    generated_token_logprobs: bool = False  # raw log p of each generated token, at generation time
-    full_vocabulary_logprobs: bool = False  # raw full distribution at each generated position
-    teacher_forced_scoring: bool = False  # log p of a given continuation after a given prompt
-    full_vocabulary_scoring: bool = False  # ... plus the full distribution at each scored position
+    generated_token_logprobs: bool = False
+    full_vocabulary_logprobs: bool = False
+    teacher_forced_scoring: bool = False
+    full_vocabulary_scoring: bool = False
 
     def missing(self, *names: str) -> list[str]:
         known = {f.name for f in fields(self)}
@@ -77,9 +77,9 @@ class GenerationRequest:
 class GenerationResult:
     """One continuation, normalized across backends. Log-probs/entropies are of the raw model distribution."""
 
-    token_ids: list[int]  # model-generated tokens only (EOS kept when generated)
+    token_ids: list[int]
     text: str
-    finish_reason: str  # stop | length
+    finish_reason: str
     prompt_tokens: int
     backend: str
     model: str
@@ -89,7 +89,7 @@ class GenerationResult:
     logprob_mode: LogprobMode = "none"
     token_logprobs: list[float] | None = None
     token_entropies: list[float] | None = None
-    scorer: str | None = None  # scorer id when log-probs are present
+    scorer: str | None = None
     latency_s: float = 0.0
 
     @property
@@ -115,20 +115,20 @@ class TokenScores:
     """Teacher-forced raw-model scores of a fixed continuation after a fixed prompt."""
 
     token_logprobs: list[float]
-    token_entropies: list[float] | None  # None unless full-vocabulary scoring was requested
+    token_entropies: list[float] | None
     scorer: str
     latency_s: float = 0.0
 
 
 @dataclass(frozen=True)
 class ParsedOutput:
-    content: str  # text with the reasoning removed
+    content: str
     reasoning: str
 
 
 @runtime_checkable
 class ModelBackend(Protocol):
-    name: str  # backend kind
+    name: str
     info: BackendInfo
     capabilities: BackendCapabilities
     scorer_id: str

@@ -31,7 +31,7 @@ class RiskModel(Protocol):
 
 @dataclass(frozen=True)
 class RiskModelSpec:
-    build: Callable[[], RiskModel]  # an untrained model configured from the settings
+    build: Callable[[], RiskModel]
     load: Callable[[Path], RiskModel]
     suffix: str = ".pt"
 

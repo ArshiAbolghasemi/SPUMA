@@ -4,5 +4,4 @@
 #   scripts/run-benchmark.sh --backend transformers                     # one backend
 set -euo pipefail
 cd "$(dirname "$0")/.."
-# --no-sync: a plain `uv run` re-syncs without extras and would strip torch/vllm
 exec uv run --no-sync --active python -m spuma.models.benchmark "$@"

@@ -21,7 +21,7 @@ def _prompt(b):
 
 
 def test_capabilities_require_installed_vllm(monkeypatch):
-    monkeypatch.setattr(vllm_module, "SamplingParams", None)  # what a failed `import vllm` leaves
+    monkeypatch.setattr(vllm_module, "SamplingParams", None)
     with pytest.raises(BackendCapabilityError, match="not installed"):
         VLLMBackend.capabilities_for(ModelConfig(backend="vllm"))
 
@@ -44,7 +44,7 @@ def test_capabilities_reject_incompatible_version(fake_vllm_module, monkeypatch)
 
 def test_sampling_params_translation(vllm_backend):
     sp = vllm_backend.sampling_params(SAMPLE, n=10, seed=3, logprobs="full")
-    assert (sp.n, sp.temperature, sp.top_p, sp.top_k, sp.seed) == (10, 0.7, 0.9, 0, 3)  # top_k 0 = off in vLLM 0.31
+    assert (sp.n, sp.temperature, sp.top_p, sp.top_k, sp.seed) == (10, 0.7, 0.9, 0, 3)
     assert sp.logprobs == -1 and sp.flat_logprobs and not sp.detokenize and sp.max_tokens == 6
     assert vllm_backend.sampling_params(SAMPLE, 1, 0, "token").logprobs == 0
     assert vllm_backend.sampling_params(SAMPLE, 1, 0, "none").logprobs is None
@@ -86,7 +86,7 @@ def test_batch_and_ten_samples(vllm_backend):
     )
     assert [len(r) for r in batch] == [10, 1]
     assert all(r.token_logprobs is None for r in batch[0]) and batch[1][0].token_entropies is None
-    assert len(vllm_backend.llm.requests) == 2  # one engine call, two requests
+    assert len(vllm_backend.llm.requests) == 2
 
 
 def test_teacher_forced_score_alignment(vllm_backend, tiny_backend):
@@ -109,7 +109,7 @@ def test_score_respects_max_model_len(vllm_backend):
 
 
 def test_truncated_distribution_is_rejected(vllm_backend):
-    flat = fake_vllm.FlatLogprobs([0], [3], [5, 5, 7], [-0.1, -0.1, -2.0])  # 2 distinct of a ~400 vocabulary
+    flat = fake_vllm.FlatLogprobs([0], [3], [5, 5, 7], [-0.1, -0.1, -2.0])
     with pytest.raises(BackendCapabilityError, match="truncated entropy"):
         vllm_backend._extract(_positions(flat), [5], full=True)
 

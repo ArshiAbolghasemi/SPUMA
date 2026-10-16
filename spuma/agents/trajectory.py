@@ -14,21 +14,20 @@ class StepRecord(BaseModel):
     problem_id: str
     agent_id: str
     step_id: int
-    input_messages: list[dict[str, Any]]  # chat-template dicts, the exact conversation rendered
-    prompt_ids: list[int]  # exact model input
+    input_messages: list[dict[str, Any]]
+    prompt_ids: list[int]
     generation_params: dict[str, Any]
     seed: int
-    token_ids: list[int]  # model-generated tokens only
+    token_ids: list[int]
     text: str
-    # Raw-model scores of token_ids; `scored_by` names the engine that produced them (None: not scored yet).
     token_logprobs: list[float] | None = None
     token_entropies: list[float] | None = None
     scored_by: str | None = None
-    generation_meta: dict[str, Any] = Field(default_factory=dict)  # backend, finish reason, latency, ...
+    generation_meta: dict[str, Any] = Field(default_factory=dict)
     content: str = ""
     reasoning: str = ""
-    metrics: dict[str, float] = Field(default_factory=dict)  # filled by spuma.uncertainty
-    uq_details: dict[str, Any] = Field(default_factory=dict)  # semantic-entropy samples, clusters, policy
+    metrics: dict[str, float] = Field(default_factory=dict)
+    uq_details: dict[str, Any] = Field(default_factory=dict)
 
 
 class AgentTrace(BaseModel):
@@ -43,7 +42,7 @@ class Trajectory(BaseModel):
     problem_id: str
     problem: str
     agents: list[AgentTrace]
-    final_answer_text: str  # the last agent's (Reviewer's) final message
+    final_answer_text: str
 
     def agent(self, agent_id: str) -> AgentTrace:
         return next(a for a in self.agents if a.agent_id == agent_id)

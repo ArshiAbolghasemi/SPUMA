@@ -47,7 +47,7 @@ def test_engine_reuse_and_release(monkeypatch):
     b = get_backend(
         dataclasses.replace(cfg, **{"generation": dataclasses.replace(cfg.generation, **{"temperature": 0.1})})
     )
-    assert a is b and len(_Fake.made) == 1  # generation settings do not create a new engine
+    assert a is b and len(_Fake.made) == 1
     release_backends()
     assert a.closed and not engines_module._INSTANCES
 
@@ -67,7 +67,6 @@ def test_fingerprints_separate_engines_and_generation():
     assert base.fingerprint("transformers") != base.fingerprint("vllm")
     hybrid = dataclasses.replace(base, **{"backend": "vllm", "scoring_backend": "transformers"})
     assert hybrid.scoring_kind == "transformers" and not hybrid.scores_at_generation
-    # vLLM engine settings do not touch the Transformers engine identity, and vice versa
     tweaked = dataclasses.replace(hybrid, **{"vllm": VLLMBackendConfig(gpu_memory_utilization=0.5)})
     assert tweaked.fingerprint("transformers") == hybrid.fingerprint("transformers")
     assert tweaked.generation_fingerprint() != hybrid.generation_fingerprint()
@@ -129,7 +128,7 @@ def test_validation_passes_for_transformers(with_model):
 
 
 def test_validation_fails_early_without_vllm(with_model, monkeypatch):
-    monkeypatch.setattr(vllm_module, "SamplingParams", None)  # vLLM not installed
+    monkeypatch.setattr(vllm_module, "SamplingParams", None)
     with_model(backend="vllm")
     with pytest.raises(BackendCapabilityError, match="vLLM is not installed"):
         validate_backends()
@@ -139,7 +138,6 @@ def test_validation_reports_capped_logprobs(with_model, set_settings, fake_vllm_
     capped = with_model(backend="vllm", scoring_backend="same", vllm={"max_logprobs": 20})
     with pytest.raises(BackendCapabilityError, match="full_vocabulary_logprobs"):
         validate_backends()
-    # NLL-only experiments do not need the full vocabulary
     raw = capped.to_dict()
     raw["uncertainty"]["predictive_entropy"]["enabled"] = False
     raw["features"]["order"] = [f for f in raw["features"]["order"] if not f.endswith("_pe")]

@@ -46,8 +46,6 @@ def rule_nli(request, monkeypatch):
         return None
     nli = RuleNLI()
 
-    # UQLM's SemanticEntropy.score ends with a fixed time.sleep(0.1); skip it in tests only
     monkeypatch.setattr(entropy, "time", types.SimpleNamespace(sleep=lambda s: None, time=time.time))
-    # real UQLM scorer, clustering and entropy; rule NLI instead of the model download
     monkeypatch.setattr(estimators, "LabelOrderedNLI", lambda **kwargs: nli)
     return nli

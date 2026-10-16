@@ -24,7 +24,7 @@ from spuma.models.backend import GenerationRequest, GenerationResult, ModelBacke
 
 logger = logging.getLogger(__name__)
 
-BATCH_WINDOW_S = 0.01  # how long the dispatcher waits for more requests after the first one arrives
+BATCH_WINDOW_S = 0.01
 _STOP = object()
 
 
@@ -36,13 +36,11 @@ class MicroBatcher:
         self.name, self.info = backend.name, backend.info
         self.capabilities, self.scorer_id = backend.capabilities, backend.scorer_id
         self.window_s = window_s
-        self.batches = 0  # dispatched engine calls (for logs and tests)
+        self.batches = 0
         self._queue: queue.Queue[Any] = queue.Queue()
         self._tokenizer_lock = threading.Lock()
         self._thread = threading.Thread(target=self._dispatch, name=f"spuma-batcher-{backend.name}", daemon=True)
         self._thread.start()
-
-    # --- generation: batched -------------------------------------------------------------------
 
     def generate(self, request: GenerationRequest) -> list[GenerationResult]:
         return self.generate_batch([request])[0]
@@ -79,7 +77,7 @@ class MicroBatcher:
         start = time.perf_counter()
         try:
             results = self.backend.generate_batch([request for request, _ in batch])
-        except BaseException as e:  # noqa: BLE001 - every waiting caller gets the engine's error
+        except BaseException as e:  # noqa: BLE001
             for _, future in batch:
                 future.set_exception(e)
             return
@@ -104,8 +102,6 @@ class MicroBatcher:
     def close(self) -> None:
         self.stop()
         self.backend.close()
-
-    # --- everything else: delegated ------------------------------------------------------------
 
     def render(self, messages: Sequence[BaseMessage]) -> list[int]:
         with self._tokenizer_lock:

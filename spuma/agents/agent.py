@@ -35,7 +35,6 @@ class LLMAgent:
         self.backend = backend
         self.generation = root.generation_for(config)
         self.model_name = root.model_for(config).name
-        # Raw-model log-probs are captured while generating only if this backend is also the scorer.
         self.logprobs = generation_logprob_mode(root.model_for(config))
         self.seed = root.project.seed
 

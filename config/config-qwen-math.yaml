@@ -15,36 +15,30 @@ experiment:
 
 model:
   name: Qwen/Qwen2.5-7B-Instruct
-  revision: null             # pin a Hub commit for reproducibility
-  tokenizer_revision: null   # null: same as revision
-  # Generation backend (agent steps + semantic-entropy sampling): transformers | vllm
+  revision: null
+  tokenizer_revision: null
   backend: vllm
-  # PE/NLL scoring backend: same | transformers | vllm
-  #   same          score at generation time with `backend` (exact: raw distribution, same context)
-  #   transformers  teacher-force the saved prompt/continuation token ids in a later stage; with
-  #                 backend: vllm this is the hybrid mode (vLLM is released before Transformers loads)
   scoring_backend: transformers
   dtype: bfloat16
   enable_thinking: false
   generation:
     temperature: 0.7
     top_p: 1.0
-    top_k: null              # null = disabled (translated to each backend's own "off" value)
+    top_k: null
     max_new_tokens: 2048
 
   transformers:
     device: auto
     attn_implementation: sdpa
-    scoring_chunk_size: 256  # vocabulary-softmax rows per chunk on the GPU
+    scoring_chunk_size: 256
 
   vllm:
     max_model_len: 8192
     gpu_memory_utilization: 0.85
     tensor_parallel_size: 1
-    max_logprobs: -1         # -1 = full vocabulary; needed for PE computed by vLLM
+    max_logprobs: -1
     enforce_eager: false
 
-# Extra named models for future agents (agents reference them by key; `default` is `model` above).
 models: {}
 
 agents:
@@ -81,26 +75,22 @@ uncertainty:
   predictive_entropy:
     enabled: true
     full_vocabulary: true
-    distribution: raw_model  # untempered, untruncated model distribution
+    distribution: raw_model
 
   semantic_entropy:
     enabled: true
-    backend: uqlm            # uqlm.scorers.SemanticEntropy: NLI clustering + discrete entropy
-    # sampling (done by the generation backend from each step's frozen context)
+    backend: uqlm
     n: 10
     temperature: 0.7
     top_p: 1.0
     top_k: null
-    max_new_tokens: null     # null: the agent's max_new_tokens
-    # clustering (UQLM): the step's text + its n samples, NLI entailment in either direction
-    # equivalence of two texts: answer_aware = both box an answer -> math-verify; exactly one -> different;
-    # neither (unfinished reasoning, no boxed answer) -> NLI.  nli = NLI for every pair.
+    max_new_tokens: null
     equivalence: answer_aware
-    nli_model_name: tasksource/ModernBERT-large-nli  # any 3-way NLI model; labels are mapped by name
-    nli_max_length: 8000     # characters per text; UQLM truncates longer ones
-    nli_max_tokens: 2048     # tokens per text pair (ModernBERT-large-nli limit; DeBERTa-MNLI: 512)
+    nli_model_name: tasksource/ModernBERT-large-nli
+    nli_max_length: 8000
+    nli_max_tokens: 2048
     nli_batch_size: 32
-    nli_device: null         # null: CUDA, then MPS, then CPU
+    nli_device: null
 
   nll:
     enabled: true
@@ -126,25 +116,22 @@ features:
     - reviewer_nll
     - reviewer_length
 
-# risk model `spn`: one joint SPN over (Z, Y) with indicator leaves for Y;
-# `spn_class_conditional`: the baseline P(Y) * SPN_c(Z). Both use the settings below.
 spn:
   backend: spflow
   target: incorrect
   seed: 42
-  leaf: histogram          # normal | laplace | histogram (continuous feature leaves)
+  leaf: histogram
   histogram:
     bins: 10
-    strategy: uniform      # uniform | quantile (edges from the training data, per feature)
-    smoothing: 1.0         # Laplace pseudo-count per cell (bins + 2 exponential tails)
-  # LearnSPN structure learning
-  min_instances_slice: 50  # fewer rows: stop clustering, factorize into leaves
+    strategy: uniform
+    smoothing: 1.0
+  min_instances_slice: 50
   min_features_slice: 2
-  n_clusters: 2            # k-means clusters per sum node
-  rdc_threshold: 0.3       # RDC dependence threshold for product-node splits
-  keep_label_dependence: true  # joint SPN: never split a varying Y off alone (false = plain LearnSPN)
+  n_clusters: 2
+  rdc_threshold: 0.3
+  keep_label_dependence: true
   standardize: true
-  prior_smoothing: 1.0     # Laplace pseudo-count of the label (indicator leaves / class prior)
+  prior_smoothing: 1.0
 
 evaluation:
   metrics:
@@ -157,8 +144,7 @@ evaluation:
     - ece
     - nll
   ece_bins: 15
-  # Error-risk models to train and evaluate (registry: spuma/evaluation/risk.py). Only the SPN for now.
-  risk_models:            # spn (joint) | spn_class_conditional (baseline)
+  risk_models:
     - spn
     - spn_class_conditional
 

@@ -59,7 +59,7 @@ def test_all_experiments_run_by_default_each_with_its_own_settings(experiments):
     _, log, released = experiments
     assert cli.main(["--phase", "evaluate", "--limit", "3"]) == 0
     assert log == [("exp_a", ["evaluate"], 3), ("exp_b", ["evaluate"], 3)]
-    assert len(released) == 2  # engines freed after each experiment
+    assert len(released) == 2
 
 
 def test_selected_experiment_only(experiments):

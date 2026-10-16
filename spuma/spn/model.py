@@ -120,7 +120,7 @@ class _SPN:
         if Z.ndim != 2 or Z.shape[1] != len(self.feature_names):
             raise ValueError(f"expected shape (n, {len(self.feature_names)}), got {Z.shape}")
         if self.config.standardize:
-            Z = (Z - self.mean) / self.std  # NaN stays NaN (marginalized)
+            Z = (Z - self.mean) / self.std
         return torch.tensor(Z, dtype=torch.float64)
 
     def _features(self, Z: np.ndarray, marginalize: list[str] | None) -> torch.Tensor:
@@ -186,13 +186,12 @@ class _SPN:
 
     @classmethod
     def load(cls, path: Path | io.BytesIO) -> Self:
-        # Our own checkpoint (pickled SPFlow modules); never load checkpoints from untrusted sources.
         state = torch.load(path, weights_only=False)
         if state.get("kind") != cls.kind:
             raise ValueError(
                 f"checkpoint holds a {state.get('kind') or 'class_conditional (old format)'} SPN, not {cls.kind}"
             )
-        model = cls.__new__(cls)  # the checkpoint's own config and features, not the current settings
+        model = cls.__new__(cls)
         model._init(build_config(SPNConfig, state["config"]), state["feature_names"])
         model.mean, model.std = state["mean"], state["std"]
         model._restore(state)
