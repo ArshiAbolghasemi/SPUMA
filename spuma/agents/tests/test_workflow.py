@@ -104,17 +104,13 @@ def test_uq_measures_every_response_after_it_is_generated_and_never_routes(confi
     assert unmeasured.rounds == traj.rounds and unmeasured.messages == traj.messages
 
 
-def test_runs_are_independent_and_reproducible(config, scripted_backend_cls):
-    def run(run_id):
-        traj = build_workflow(_shared(scripted_backend_cls([A1, DONE]))).run("p1", "q", run_id)
-        return traj, [s.seed for a in traj.agents for s in a.steps]
+def test_reruns_are_reproducible_and_seeds_differ_per_agent_and_round(config, scripted_backend_cls):
+    def run():
+        traj = build_workflow(_shared(scripted_backend_cls([A1, B1, A2, DONE]))).run("p1", "q")
+        return [s.seed for a in traj.agents for s in a.steps], len(traj.messages)
 
-    first, seeds0 = run(0)
-    _, seeds0_again = run(0)
-    other, seeds1 = run(1)
-    assert seeds0 == seeds0_again and not set(seeds0) & set(seeds1) and len(set(seeds0)) == 2
-    assert first.run_id == 0 and other.run_id == 1 and other.agents[0].steps[0].run_id == 1
-    assert len(first.messages) == len(other.messages) == 2
+    (seeds, n), (again, m) = run(), run()
+    assert seeds == again and len(set(seeds)) == 4 and n == m == 4
 
 
 def test_a_failing_step_ends_the_run_as_error_and_keeps_earlier_steps(config, scripted_backend_cls):

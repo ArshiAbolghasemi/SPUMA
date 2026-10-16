@@ -1,4 +1,4 @@
-"""End-to-end: MATH-like problems -> Mathematician <-> Enthusiast feedback loop, several runs per problem, UQ
+"""End-to-end: MATH-like problems -> Mathematician <-> Enthusiast feedback loop, UQ
 after every response (MCSP, SE, SD, length) -> per-agent aggregation -> 8 features + label per run -> SPN
 train/infer -> AUROC/AUARC, with a deterministic fake model."""
 
@@ -15,7 +15,7 @@ from spuma.models.backend import BackendCapabilityError, BackendInfo, Generation
 from spuma.models.chat import parse_qwen_output, to_chat_dicts
 from spuma.models.tests.fixtures import ALL_CAPABILITIES
 
-RUNS, ROUNDS = 2, 3
+ROUNDS = 3
 METRICS = {"mcsp", "se", "sd", "length"}
 
 
@@ -130,7 +130,7 @@ def _config(config, tmp_path, backend="transformers", scoring="same", concurrent
     raw = config.to_dict()
     raw["experiment"]["output_dir"] = str(tmp_path)
     raw["experiment"]["concurrent_problems"] = concurrent
-    raw["agents"]["num_runs"], raw["agents"]["max_rounds"] = RUNS, ROUNDS
+    raw["agents"]["max_rounds"] = ROUNDS
     raw["evaluation"]["bootstrap"]["iterations"] = 50
     raw["spn"]["min_instances_slice"] = 20
     raw["model"]["backend"], raw["model"]["scoring_backend"] = backend, scoring
@@ -164,10 +164,8 @@ def fake_capabilities(monkeypatch):
     monkeypatch.setattr("spuma.models.validation.backend_class", lambda kind: cls)
 
 
-def _run(runner, problem_id, run):
-    return runner.store.read_json(
-        f"{runner.generation_dir()}/trajectories/{problem_id.replace('/', '__')}/run-{run}.json"
-    )
+def _record(runner, problem_id):
+    return runner.store.read_json(f"{runner.generation_dir()}/trajectories/{problem_id.replace('/', '__')}.json")
 
 
 def test_full_pipeline(config, set_settings, tmp_path, fake_capabilities):
@@ -181,7 +179,7 @@ def test_full_pipeline(config, set_settings, tmp_path, fake_capabilities):
     assert model.score_calls == 0  # no completion marker to strip with text around it: nothing teacher-forced
 
     summary = store.read_json("summary.json")
-    assert summary["n"] == 30 * RUNS and 0 < summary["accuracy"] < 1
+    assert summary["n"] == 30 and 0 < summary["accuracy"] < 1
     assert summary["models"]["spn"]["auroc"] > 0.9
     assert summary["models"]["spn"]["auarc"] > summary["accuracy"]
     names = {"spn", "spn_class_conditional"}
@@ -189,13 +187,12 @@ def test_full_pipeline(config, set_settings, tmp_path, fake_capabilities):
 
     d = runner.scored_dir()
     feats = store.read_json(f"{d}/features.json")
-    assert len(feats) == 100 * RUNS and list(feats[0]["features"]) == cfg.features.order
-    assert {(r["problem_id"], r["run_id"]) for r in feats} == {(f["problem_id"], k) for f in feats for k in range(RUNS)}
-    assert store.read_json(f"{d}/skipped_runs.json") == []
+    assert len(feats) == 100 and list(feats[0]["features"]) == cfg.features.order
+    assert store.read_json(f"{d}/skipped.json") == []
 
-    record = _run(runner, feats[0]["problem_id"], 1)
+    record = _record(runner, feats[0]["problem_id"])
     traj = record["trajectory"]
-    assert record["run_id"] == 1 and record["run_seed"] and record["grade"]["label"] in (0, 1)
+    assert record["grade"]["label"] in (0, 1)
     assert traj["rounds"] == 2 and traj["termination_reason"] == "task_done"
     assert [(m["agent_id"], m["round"]) for m in traj["messages"]] == [
         ("mathematician", 1),
@@ -205,7 +202,7 @@ def test_full_pipeline(config, set_settings, tmp_path, fake_capabilities):
     ]
     mathematician, enthusiast = traj["agents"]
     steps = mathematician["steps"] + enthusiast["steps"]
-    assert all(set(s["metrics"]) == METRICS and s["run_id"] == 1 for s in steps)
+    assert all(set(s["metrics"]) == METRICS for s in steps)
     first = mathematician["steps"][0]
     assert "se_samples" not in first["uq_details"] and 0 <= first["metrics"]["se"]
     mc = first["uq_details"]["mc_samples"]
@@ -217,41 +214,39 @@ def test_full_pipeline(config, set_settings, tmp_path, fake_capabilities):
     done = enthusiast["steps"][-1]
     assert done["text"] == "TASK_DONE" and done["uq_details"]["view"]["marker_only_texts"] == 11
     progress_log = store.read_jsonl(
-        f"{runner.generation_dir()}/trajectories/{feats[0]['problem_id'].replace('/', '__')}/run-1.steps.jsonl"
+        f"{runner.generation_dir()}/trajectories/{feats[0]['problem_id'].replace('/', '__')}.steps.jsonl"
     )
     assert [(s["agent_id"], s["round"]) for s in progress_log] == [
         (m["agent_id"], m["round"]) for m in traj["messages"]
     ]
 
     lines = store.read_jsonl(f"{d}/steps.jsonl")
-    assert len(lines) == 4 * 100 * RUNS
+    assert len(lines) == 4 * 100
     line = lines[0]
-    assert {"problem_id", "run_id", "agent_id", "round", "input_messages", "text", "seed", "generation_params"} <= set(
-        line
-    )
+    assert {"problem_id", "agent_id", "round", "input_messages", "text", "seed", "generation_params"} <= set(line)
     assert line["token_logprobs"] and set(line["metrics"]) == METRICS and line["uq_details"]["mc_samples"]["seeds"]
     rows = store.read_json(f"{d}/step_metrics.json")
-    assert len(rows) == len(lines) and {"run_id", "round"} <= set(rows[0])
+    assert len(rows) == len(lines) and "round" in rows[0]
 
     ev = store.read_json(f"{d}/evaluation.json")
     preds = ev["splits"]["test"]["predictions"]["spn"]
-    assert len(preds) == 30 * RUNS and {p["run_id"] for p in preds} == set(range(RUNS))
+    assert len(preds) == 30
     assert all(0 <= p["p_incorrect"] <= 1 and 0 <= p["posterior_entropy"] <= math.log(2) + 1e-9 for p in preds)
     assert "ci_low" in ev["splits"]["test"]["models"]["spn"]["auroc"]
     assert set(ev["splits"]["test"]["models"]["spn"]) >= {"auroc", "auprc", "auarc", "aurc", "brier", "ece", "nll"}
     status = store.read_json(f"{d}/models/spn_status.json")
-    assert status["status"] == "trained" and status["train_rows"] == 60 * RUNS
+    assert status["status"] == "trained" and status["train_rows"] == 60
 
     meta = json.loads(next(store.path("runs").iterdir()).read_text())
     assert (
         meta["monte_carlo_policy"]["num_generations"] == 10 and meta["monte_carlo_policy"]["uqlm_mode"] == "white_box"
     )
-    assert meta["agents"]["num_runs"] == RUNS and meta["packages"]["uqlm"] and meta["base_seed"] == cfg.project.seed
+    assert meta["agents"]["max_rounds"] == ROUNDS and meta["packages"]["uqlm"] and meta["base_seed"] == cfg.project.seed
     assert store.read_json("config.json")["model"]["name"] == "Qwen/Qwen2.5-7B-Instruct"
 
     calls = model.calls
     ExperimentRunner(FakeDataset(), engines.factory, release=engines.release).run()
-    assert engines.all[-1].calls == 0 and model.calls == calls  # resume: every run is kept
+    assert engines.all[-1].calls == 0 and model.calls == calls  # resume: every problem is kept
 
 
 def test_vllm_generation_measures_with_the_same_engine(config, set_settings, tmp_path, fake_capabilities):
@@ -261,8 +256,8 @@ def test_vllm_generation_measures_with_the_same_engine(config, set_settings, tmp
     runner.run()
     assert engines.events == [("load", "vllm", ["vllm"]), ("release", ["vllm"])]
     feats = runner.store.read_json(f"{runner.scored_dir()}/features.json")
-    assert len(feats) == 100 * RUNS and all(len(r["features"]) == 8 for r in feats)
-    step = _run(runner, feats[0]["problem_id"], 0)["trajectory"]["agents"][0]["steps"][0]
+    assert len(feats) == 100 and all(len(r["features"]) == 8 for r in feats)
+    step = _record(runner, feats[0]["problem_id"])["trajectory"]["agents"][0]["steps"][0]
     assert step["scored_by"] == engines.all[0].scorer_id and step["uq_details"]["mc_samples"]["backend"] == "vllm"
 
 
@@ -274,28 +269,28 @@ def test_separate_scoring_backend_is_rejected(config, set_settings, tmp_path, fa
     assert engines.events == []
 
 
-def test_failed_runs_are_recorded_skipped_and_retried(config, set_settings, tmp_path, fake_capabilities):
+def test_failed_problems_are_recorded_skipped_and_retried(config, set_settings, tmp_path, fake_capabilities):
     set_settings(_config(config, tmp_path))
     engines = Engines()
     runner = ExperimentRunner(FakeDataset(), engines.factory, release=engines.release)
     model = engines.factory(config.model, "transformers")
     model.fail_batches_for = {"What is 1+2?"}
     runner.run(phases=["generate", "score"])
-    failed = _run(runner, "math/train/x/1", 0)
+    failed = _record(runner, "math/train/x/1")
     assert failed["trajectory"]["termination_reason"] == "error" and "sampling failed" in failed["trajectory"]["error"]
     assert failed["grade"] is None
-    skipped = runner.store.read_json(f"{runner.scored_dir()}/skipped_runs.json")
-    assert {(s["problem_id"], s["run_id"]) for s in skipped} == {("math/train/x/1", k) for k in range(RUNS)}
-    assert len(runner.store.read_json(f"{runner.scored_dir()}/features.json")) == 100 * RUNS - RUNS
+    skipped = runner.store.read_json(f"{runner.scored_dir()}/skipped.json")
+    assert [s["problem_id"] for s in skipped] == ["math/train/x/1"]
+    assert len(runner.store.read_json(f"{runner.scored_dir()}/features.json")) == 99
 
     retry = Engines()
     ExperimentRunner(FakeDataset(), retry.factory, release=retry.release).run(phases=["generate", "score"])
-    assert _run(runner, "math/train/x/1", 0)["trajectory"]["termination_reason"] == "task_done"
-    assert retry.all[0].calls > 0 and len(runner.store.read_json(f"{runner.scored_dir()}/features.json")) == 100 * RUNS
+    assert _record(runner, "math/train/x/1")["trajectory"]["termination_reason"] == "task_done"
+    assert retry.all[0].calls > 0 and len(runner.store.read_json(f"{runner.scored_dir()}/features.json")) == 100
 
 
-def test_concurrent_runs_give_identical_results(config, set_settings, tmp_path, fake_capabilities):
-    """8 runs in flight (batched model calls, scorers on the main thread) produce exactly the features of the
+def test_concurrent_problems_give_identical_results(config, set_settings, tmp_path, fake_capabilities):
+    """8 problems in flight (batched model calls, scorers on the main thread) produce exactly the features of the
     one-at-a-time run."""
     outputs = {}
     for concurrent in (1, 8):
@@ -304,5 +299,5 @@ def test_concurrent_runs_give_identical_results(config, set_settings, tmp_path, 
         runner = ExperimentRunner(FakeDataset(), engines.factory, release=engines.release)
         runner.run(phases=["generate", "score"])
         rows = runner.store.read_json(f"{runner.scored_dir()}/features.json")
-        outputs[concurrent] = {(r["problem_id"], r["run_id"]): (r["features"], r["label"]) for r in rows}
-    assert len(outputs[1]) == 100 * RUNS and outputs[1] == outputs[8]
+        outputs[concurrent] = {r["problem_id"]: (r["features"], r["label"]) for r in rows}
+    assert len(outputs[1]) == 100 and outputs[1] == outputs[8]

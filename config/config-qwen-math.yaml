@@ -43,7 +43,6 @@ models: {}
 
 agents:
   workflow: feedback
-  num_runs: 10
   max_rounds: 10
   completion_token: TASK_DONE
   items:

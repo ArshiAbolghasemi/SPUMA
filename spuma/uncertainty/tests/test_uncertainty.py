@@ -150,8 +150,8 @@ def test_monte_carlo_samples_have_their_own_deterministic_seeds(scripted_backend
     stored = step.uq_details[MC_SAMPLES_KEY]
     assert stored["seeds"] == [c.seed for c in calls] == monte_carlo_seeds(step) and len(set(stored["seeds"])) == 10
     assert stored["token_logprobs"][0] == [-0.5] * len("\\boxed{2}") and stored["scored_by"] == backend.scorer_id
-    other_run, other_round = _step(run_id=1), _step(round=2)
-    assert not set(monte_carlo_seeds(other_run)) & set(stored["seeds"])
+    other_agent, other_round = _step(agent="enthusiast"), _step(round=2)
+    assert not set(monte_carlo_seeds(other_agent)) & set(stored["seeds"])
     assert not set(monte_carlo_seeds(other_round)) & set(stored["seeds"])
     assert step.text == "t" and step.token_ids == [1, 2, 3, 4]
 
@@ -291,7 +291,7 @@ def test_aggregation_known_values():
 
 def _trajectory():
     def trace(agent, metrics_list):
-        steps = [_step(agent=agent, step_id=i, run_id=3, round=i + 1, metrics=m) for i, m in enumerate(metrics_list)]
+        steps = [_step(agent=agent, step_id=i, round=i + 1, metrics=m) for i, m in enumerate(metrics_list)]
         return AgentTrace(agent_id=agent, role=agent, model="m", steps=steps)
 
     m = lambda mc, se, sd, ln: {"mcsp": mc, "se": se, "sd": sd, "length": ln}  # noqa: E731
@@ -299,7 +299,6 @@ def _trajectory():
         problem_id="p1",
         problem="q",
         final_answer_text="\\boxed{2}",
-        run_id=3,
         agents=[
             trace("mathematician", [m(0.3, 0, 0.4, 10), m(0.4, 0, 0.6, 30)]),
             trace("enthusiast", [m(0.9, 1, 0.5, 5)]),
@@ -315,12 +314,12 @@ def test_features_are_four_metrics_per_agent(config):
     assert feats["enthusiast_se"] == 1 and feats["enthusiast_sd"] == pytest.approx(0.5)
 
 
-def test_step_metric_rows_carry_run_and_round():
+def test_step_metric_rows_carry_agent_and_round():
     rows = step_metric_rows(_trajectory())
-    assert [(r["agent_id"], r["run_id"], r["round"]) for r in rows] == [
-        ("mathematician", 3, 1),
-        ("mathematician", 3, 2),
-        ("enthusiast", 3, 1),
+    assert [(r["agent_id"], r["round"]) for r in rows] == [
+        ("mathematician", 1),
+        ("mathematician", 2),
+        ("enthusiast", 1),
     ]
 
 

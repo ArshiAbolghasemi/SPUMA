@@ -26,10 +26,10 @@ def test_real_qwen3_math_smoke(config, set_settings, tmp_path):
     raw = config.to_dict()
     raw["experiment"]["output_dir"] = str(tmp_path)
     raw["model"]["generation"]["max_new_tokens"] = 512
-    raw["agents"]["num_runs"], raw["agents"]["max_rounds"] = 1, 2
+    raw["agents"]["max_rounds"] = 2
     set_settings(type(config).from_dict(raw))
     runner = ExperimentRunner()
     runner.run(phases=["generate", "score"], limit=1)
     feats = runner.store.read_json(f"{runner.scored_dir()}/features.json")
     assert len(feats) == 3 and all(len(r["features"]) == 8 for r in feats)
-    assert runner.store.read_json(f"{runner.scored_dir()}/skipped_runs.json") == []
+    assert runner.store.read_json(f"{runner.scored_dir()}/skipped.json") == []

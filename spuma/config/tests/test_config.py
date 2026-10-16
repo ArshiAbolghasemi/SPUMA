@@ -20,12 +20,7 @@ def test_project_config_is_valid(config):
     assert len(config.features.order) == 8
     assert config.model.scoring_backend == "same"
     agents = config.agents
-    assert (agents.workflow, agents.num_runs, agents.max_rounds, agents.completion_token) == (
-        "feedback",
-        10,
-        10,
-        "TASK_DONE",
-    )
+    assert (agents.workflow, agents.max_rounds, agents.completion_token) == ("feedback", 10, "TASK_DONE")
     mc = config.uncertainty.monte_carlo
     assert mc.num_generations == 10 and mc.length_normalize
 
@@ -73,8 +68,8 @@ def test_cache_fingerprints_split_generation_and_features(config):
             uncertainty=dataclasses.replace(uq, **{section: dataclasses.replace(getattr(uq, section), **fields)}),
         )
         assert other.generation_fingerprint() != config.generation_fingerprint()
-    more_runs = dataclasses.replace(config, agents=dataclasses.replace(config.agents, num_runs=3))
-    assert more_runs.generation_fingerprint() != config.generation_fingerprint()
+    more_rounds = dataclasses.replace(config, agents=dataclasses.replace(config.agents, max_rounds=3))
+    assert more_rounds.generation_fingerprint() != config.generation_fingerprint()
     rms = dataclasses.replace(config, aggregation=dataclasses.replace(config.aggregation, token_length="rms"))
     assert rms.generation_fingerprint() == config.generation_fingerprint()
     assert rms.scoring_fingerprint() != config.scoring_fingerprint()
@@ -91,7 +86,6 @@ def test_semantic_entropy_must_match_the_shared_samples(raw_config):
 def test_feedback_workflow_settings_are_validated(raw_config):
     for key, value, match in (
         ("max_rounds", 0, "max_rounds"),
-        ("num_runs", 0, "num_runs"),
         ("completion_token", " ", "completion_token"),
     ):
         bad = {**raw_config, "agents": {**raw_config["agents"], key: value}}

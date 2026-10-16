@@ -37,7 +37,6 @@ StepHook = Callable[[StepRecord], None]
 class RunState(TypedDict):
     problem_id: str
     problem: str
-    run_id: int
     round: int
     messages: Annotated[list[dict[str, Any]], operator.add]
     current_agent: str
@@ -53,7 +52,7 @@ def build_agents(backend_for: Callable[[str], ModelBackend]) -> list[LLMAgent]:
 
 
 class _Workflow:
-    """Shared machinery: generation and UQ nodes, running one independent run, assembling the trajectory."""
+    """Shared machinery: generation and UQ nodes, running a problem from a fresh state, assembling the trajectory."""
 
     def __init__(self, agents: list[LLMAgent], uq: Any = None, on_step: StepHook | None = None) -> None:
         self.agents, self.uq, self.on_step = agents, uq, on_step
@@ -65,7 +64,7 @@ class _Workflow:
 
     def _speak(self, agent: LLMAgent, state: RunState, round: int) -> dict[str, Any]:
         step_id = sum(s.agent_id == agent.id for s in state["generation_metadata"])
-        record = agent.step(self.view(agent, state), state["problem_id"], step_id, state["run_id"], round)
+        record = agent.step(self.view(agent, state), state["problem_id"], step_id, round)
         return {
             "messages": [{"agent_id": agent.id, "round": round, "content": record.content}],
             "generation_metadata": [record],
@@ -92,11 +91,10 @@ class _Workflow:
 
         return node
 
-    def _initial(self, problem_id: str, problem: str, run_id: int) -> RunState:
+    def _initial(self, problem_id: str, problem: str) -> RunState:
         return {
             "problem_id": problem_id,
             "problem": problem,
-            "run_id": run_id,
             "round": 0,
             "messages": [],
             "current_agent": "",
@@ -106,22 +104,22 @@ class _Workflow:
             "generation_metadata": [],
         }
 
-    def run(self, problem_id: str, problem: str, run_id: int = 0) -> Trajectory:
-        """One independent run from a fresh state. An exception ends the run with `termination_reason: error`
+    def run(self, problem_id: str, problem: str) -> Trajectory:
+        """The problem from a fresh state. An exception ends the run with `termination_reason: error`
         and keeps the steps finished before it."""
-        state = initial = self._initial(problem_id, problem, run_id)
+        state = initial = self._initial(problem_id, problem)
         error = None
         try:
             for latest in self.graph.stream(initial, {"recursion_limit": self.recursion_limit}, stream_mode="values"):
                 state = latest
         except Exception as e:  # noqa: BLE001 - recorded on the run; the other runs go on
-            logger.exception("run failed", extra={"problem_id": problem_id, "run_id": run_id})
+            logger.exception("run failed", extra={"problem_id": problem_id})
             error = f"{type(e).__name__}: {e}"
         reason = "error" if error else self.termination_reason(state)
         trajectory = self._trajectory(state, reason, error)
         logger.info(
             "run complete",
-            extra={"problem_id": problem_id, "run_id": run_id, "rounds": trajectory.rounds, "termination": reason},
+            extra={"problem_id": problem_id, "rounds": trajectory.rounds, "termination": reason},
         )
         return trajectory
 
@@ -151,7 +149,6 @@ class _Workflow:
             problem=state["problem"],
             agents=traces,
             final_answer_text=self.final_answer(traces),
-            run_id=state["run_id"],
             rounds=state["round"],
             termination_reason=reason,
             error=error,

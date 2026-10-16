@@ -57,7 +57,7 @@ class UncertaintyEstimator(Protocol):
 
 
 def _where(step: StepRecord) -> str:
-    return f"{step.problem_id}/run{step.run_id}/{step.agent_id}/{step.step_id}"
+    return f"{step.problem_id}/{step.agent_id}/{step.step_id}"
 
 
 def _require_tokens(step: StepRecord) -> None:
@@ -111,11 +111,10 @@ def _sample_key(step: StepRecord) -> str:
 
 
 def semantic_seeds(step: StepRecord) -> list[int]:
-    """One deterministic seed per SE sample from (project.seed, problem, run, agent, step, sample index)."""
+    """One deterministic seed per SE sample from (project.seed, problem, agent, step, sample index)."""
     base = get_settings().project.seed
     return [
-        derive_seed(base, step.problem_id, step.run_id, step.agent_id, step.step_id, "semantic_entropy", i)
-        for i in range(_se().n)
+        derive_seed(base, step.problem_id, step.agent_id, step.step_id, "semantic_entropy", i) for i in range(_se().n)
     ]
 
 
@@ -297,9 +296,9 @@ def monte_carlo_params(step: StepRecord) -> GenerationConfig:
 
 
 def monte_carlo_seeds(step: StepRecord) -> list[int]:
-    """One deterministic seed per sample from (project.seed, problem, run, agent, round, sample index)."""
+    """One deterministic seed per sample from (project.seed, problem, agent, round, sample index)."""
     base, n = get_settings().project.seed, _mc().num_generations
-    return [derive_seed(base, step.problem_id, step.run_id, step.agent_id, step.round, "uqlm", i) for i in range(n)]
+    return [derive_seed(base, step.problem_id, step.agent_id, step.round, "uqlm", i) for i in range(n)]
 
 
 class MonteCarloSampler:
@@ -494,7 +493,6 @@ class StepUncertainty:
             "step uncertainty",
             extra={
                 "problem_id": step.problem_id,
-                "run_id": step.run_id,
                 "agent_id": step.agent_id,
                 "round": step.round,
                 "metrics": metrics,
@@ -516,11 +514,10 @@ class StepUncertainty:
 
 
 def step_metric_rows(trajectory: Trajectory) -> list[dict[str, Any]]:
-    """The per-step metric rows: problem, run, agent, round, step, metrics."""
+    """The per-step metric rows: problem, agent, round, step, metrics."""
     return [
         {
             "problem_id": s.problem_id,
-            "run_id": s.run_id,
             "agent_id": s.agent_id,
             "round": s.round,
             "step_id": s.step_id,

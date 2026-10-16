@@ -31,13 +31,11 @@ class AgentsConfig:
 
     items: list[AgentConfig]
     workflow: str = "sequential"
-    num_runs: int = 1
     max_rounds: int = 10
     completion_token: str = "TASK_DONE"
 
     def __post_init__(self) -> None:
         check_choice("agents.workflow", self.workflow, ("sequential", "feedback"))
-        check_range("agents.num_runs", self.num_runs, gt=0)
         check_range("agents.max_rounds", self.max_rounds, gt=0)
         if not self.completion_token.strip():
             raise ValueError("agents.completion_token must not be empty")

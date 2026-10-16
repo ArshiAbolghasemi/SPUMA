@@ -21,9 +21,7 @@ class Agent(Protocol):
 
     def initial_messages(self, problem: str, previous: list[str]) -> list[BaseMessage]: ...
 
-    def step(
-        self, messages: Sequence[BaseMessage], problem_id: str, step_id: int, run_id: int = 0, round: int = 1
-    ) -> StepRecord: ...
+    def step(self, messages: Sequence[BaseMessage], problem_id: str, step_id: int, round: int = 1) -> StepRecord: ...
 
 
 class LLMAgent:
@@ -44,12 +42,10 @@ class LLMAgent:
         user = self.config.user_template.format(problem=problem, previous="\n\n".join(previous))
         return [SystemMessage(self.config.system_prompt), HumanMessage(user)]
 
-    def step(
-        self, messages: Sequence[BaseMessage], problem_id: str, step_id: int, run_id: int = 0, round: int = 1
-    ) -> StepRecord:
-        """One response; its seed derives from (project.seed, problem, run, agent, round)."""
+    def step(self, messages: Sequence[BaseMessage], problem_id: str, step_id: int, round: int = 1) -> StepRecord:
+        """One response; its seed derives from (project.seed, problem, agent, round)."""
         prompt_ids = self.backend.render(messages)
-        seed = derive_seed(self.seed, problem_id, run_id, self.id, round)
+        seed = derive_seed(self.seed, problem_id, self.id, round)
         request = GenerationRequest(prompt_ids, self.generation, seed=seed, n=1, logprobs=self.logprobs)
         (gen,) = self.backend.generate(request)
         parsed = self.backend.parse(gen.text)
@@ -57,7 +53,6 @@ class LLMAgent:
             problem_id=problem_id,
             agent_id=self.id,
             step_id=step_id,
-            run_id=run_id,
             round=round,
             input_messages=to_chat_dicts(messages),
             prompt_ids=prompt_ids,
@@ -77,7 +72,6 @@ class LLMAgent:
             extra={
                 "problem_id": problem_id,
                 "agent_id": self.id,
-                "run_id": run_id,
                 "round": round,
                 "step_id": step_id,
                 "generated_tokens": len(gen.token_ids),

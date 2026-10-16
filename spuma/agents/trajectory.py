@@ -14,7 +14,6 @@ class StepRecord(BaseModel):
     problem_id: str
     agent_id: str
     step_id: int
-    run_id: int = 0
     round: int = 1
     input_messages: list[dict[str, Any]]
     prompt_ids: list[int]
@@ -45,7 +44,6 @@ class Trajectory(BaseModel):
     problem: str
     agents: list[AgentTrace]
     final_answer_text: str
-    run_id: int = 0
     rounds: int = 1
     termination_reason: str = "final_message"
     error: str | None = None

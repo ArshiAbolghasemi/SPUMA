@@ -1,5 +1,5 @@
 """MATH (EleutherAI/hendrycks_math), MATU-style: two Qwen2.5-7B-Instruct agents in a feedback loop
-(Master Mathematician <-> Curious Math Enthusiast), several independent runs per problem.
+(Master Mathematician <-> Curious Math Enthusiast).
 
 Everything else (splits, backends, prompts, uncertainty, SPN, evaluation) is in its settings file.
 """

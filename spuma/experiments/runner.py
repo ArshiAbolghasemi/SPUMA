@@ -1,7 +1,7 @@
 """Experiment execution: generate -> score -> train -> evaluate.
 
-generate runs `agents.num_runs` independent runs of the agent workflow per problem; uncertainty (MCSP, SE, SD,
-token length) is measured inside the graph right after every response, on the generating engine
+generate runs the agent workflow on every problem; uncertainty (MCSP, SE, SD, token length) is measured
+inside the graph right after every response, on the generating engine
 (`model.scoring_backend: same`). score turns the measured steps into features; train/evaluate fit and score
 the risk models.
 
@@ -11,22 +11,21 @@ the risk models.
       runs/<invocation>.json           reproducibility metadata of each invocation
       generation-<gen fp>/
         agents.json                    agent settings
-        trajectories/<problem>/run-<k>.json
-                                       one run: conversation, every step (prompt, tokens, log-probs, samples,
-                                       seeds, UQ scores), rounds, termination reason, grade
-        trajectories/<problem>/run-<k>.steps.jsonl
+        trajectories/<problem>.json    conversation, every step (prompt, tokens, log-probs, samples, seeds,
+                                       UQ scores), rounds, termination reason, grade
+        trajectories/<problem>.steps.jsonl
                                        the same steps, appended as they are measured (progress log)
         scored-<feature fp>/
           step_metrics.json            per-step metric rows
-          steps.jsonl                  one full step per line, every run
-          features.json                Z per (problem, run), label Y, parse failure
+          steps.jsonl                  one full step per line, every problem
+          features.json                Z per problem, label Y, parse failure
           models/<name>.pt             risk-model checkpoints (evaluation.risk_models)
           evaluation.json              risk models on validation/test
       summary.json                     test accuracy and risk-model metrics
 
 Fingerprints in directory names (generation: model, agents, seeds, uncertainty settings; features:
 aggregation and feature settings) mean a config change never reuses stale artifacts; with
-`experiment.resume`, finished runs are kept and only missing or failed runs are generated again.
+`experiment.resume`, finished problems are kept and only missing or failed ones are generated again.
 """
 
 import logging
@@ -47,7 +46,7 @@ from spuma.agents.trajectory import Trajectory
 from spuma.agents.workflow import build_workflow
 from spuma.common.config import to_plain
 from spuma.common.logs import progress, progress_counter
-from spuma.common.utils import MainThreadCalls, derive_seed, safe_name
+from spuma.common.utils import MainThreadCalls, safe_name
 from spuma.config import PROJECT_ROOT, get_settings
 from spuma.dataset.base import AnswerGrader, DatasetProvider, Problem
 from spuma.dataset.registry import get_dataset, get_grader
@@ -135,14 +134,13 @@ class ExperimentRunner:
             "phases": phases,
             "limit": limit,
             "base_seed": config.project.seed,
-            "seed_derivation": "sha256(base_seed, problem_id, run_id, agent_id, round[, sample index])",
+            "seed_derivation": "sha256(base_seed, problem_id, agent_id, round[, sample index])",
             "git_commit": commit,
             "python": platform.python_version(),
             "platform": platform.platform(),
             "packages": {p: _version(p) for p in packages},
             "agents": {
                 "workflow": config.agents.workflow,
-                "num_runs": config.agents.num_runs,
                 "max_rounds": config.agents.max_rounds,
                 "completion_token": config.agents.completion_token,
             },
@@ -195,18 +193,13 @@ class ExperimentRunner:
             a.id: self.backend_factory(config.model_for(a), config.model_for(a).backend) for a in config.agents.enabled
         }
 
-    def run_path(self, problem: Problem, run: int, suffix: str = ".json") -> str:
-        return f"{self.generation_dir()}/trajectories/{safe_name(problem.problem_id)}/run-{run}{suffix}"
-
-    def _all_runs(self) -> list[tuple[str, int, Problem, int]]:
-        """(split, index, problem, run) for every run of every problem, in split order."""
-        n = get_settings().agents.num_runs
-        return [(split, i, p, k) for split, i, p in self._all_problems() for k in range(n)]
+    def trajectory_path(self, problem: Problem, suffix: str = ".json") -> str:
+        return f"{self.generation_dir()}/trajectories/{safe_name(problem.problem_id)}{suffix}"
 
     def generate(self) -> None:
-        """Run every (problem, run) not finished yet; uncertainty is measured inside the graph.
+        """Run every problem not finished yet; uncertainty is measured inside the graph.
 
-        `experiment.concurrent_problems` runs go at once in worker threads, each from a fresh graph state; with
+        `experiment.concurrent_problems` problems go at once in worker threads, each from a fresh graph state; with
         more than one, their model calls share batched engine calls. The main thread serves the NLI and
         math-verify parts of the uncertainty measurement (`MainThreadCalls`), grades, and saves.
         """
@@ -224,32 +217,32 @@ class ExperimentRunner:
         )
 
         pending, done = [], 0
-        for split, i, problem, run in self._all_runs():
-            rel = self.run_path(problem, run)
+        for split, i, problem in self._all_problems():
+            rel = self.trajectory_path(problem)
             if config.experiment.resume and self.store.exists(rel):
                 if self.store.read_json(rel)["trajectory"]["termination_reason"] != "error":
                     done += 1
                     continue
-            pending.append((split, i, problem, run))
+            pending.append((split, i, problem))
         logger.info("generate", extra={"pending": len(pending), "already_done": done, "concurrent": concurrency})
 
-        def run_one(problem: Problem, run: int) -> Trajectory:
-            log = self.run_path(problem, run, ".steps.jsonl")
+        def run_one(problem: Problem) -> Trajectory:
+            log = self.trajectory_path(problem, ".steps.jsonl")
             self.store.remove(log)
             workflow = build_workflow(
                 backends.__getitem__, uq, lambda step: self.store.append_jsonl(log, step.model_dump())
             )
-            return workflow.run(problem.problem_id, problem.problem, run)
+            return workflow.run(problem.problem_id, problem.problem)
 
-        pool = ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="spuma-run")
-        futures = {pool.submit(run_one, p, k): (split, i, p, k) for split, i, p, k in pending}
+        pool = ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="spuma-problem")
+        futures = {pool.submit(run_one, p): (split, i, p) for split, i, p in pending}
         try:
             with progress_counter(len(futures), "generate") as advance:
                 while futures:
                     main.serve(0.05)
                     for future in [f for f in futures if f.done()]:
-                        split, i, problem, run = futures.pop(future)
-                        self._save_run(split, i, problem, run, future.result())
+                        split, i, problem = futures.pop(future)
+                        self._save(split, i, problem, future.result())
                         advance()
         finally:
             main.close()
@@ -257,24 +250,21 @@ class ExperimentRunner:
             for batcher in batchers.values():
                 batcher.stop()
 
-    def _save_run(self, split: str, i: int, problem: Problem, run: int, trajectory: Trajectory) -> None:
+    def _save(self, split: str, i: int, problem: Problem, trajectory: Trajectory) -> None:
         failed = trajectory.termination_reason == "error"
         grade = None if failed else self.grader.grade(problem, trajectory.final_answer_text).to_dict()
         record = {
             "split": split,
-            "run_id": run,
-            "run_seed": derive_seed(get_settings().project.seed, problem.problem_id, run),
             "trajectory": trajectory.model_dump(),
             "grade": grade,
         }
-        self.store.write_json(self.run_path(problem, run), record)
+        self.store.write_json(self.trajectory_path(problem), record)
         logger.info(
             "generated",
             extra={
                 "split": split,
                 "index": i,
                 "problem_id": problem.problem_id,
-                "run_id": run,
                 "rounds": trajectory.rounds,
                 "termination": trajectory.termination_reason,
                 "label": None if failed else grade["label"],
@@ -282,19 +272,20 @@ class ExperimentRunner:
         )
 
     def score(self) -> None:
-        """Features from the measured steps of every finished run; failed or missing runs are reported, not
-        filled in."""
+        """Features from the measured steps of every finished problem; failed or missing problems are reported,
+        not filled in."""
         out_dir = self.scored_dir()
         rows, step_rows, step_records, skipped = [], [], [], []
-        for split, _, problem, run in progress(self._all_runs(), total=len(self._all_runs()), desc="score"):
-            rel = self.run_path(problem, run)
+        problems = self._all_problems()
+        for split, _, problem in progress(problems, total=len(problems), desc="score"):
+            rel = self.trajectory_path(problem)
             if not self.store.exists(rel):
-                skipped.append({"problem_id": problem.problem_id, "run_id": run, "reason": "missing"})
+                skipped.append({"problem_id": problem.problem_id, "reason": "missing"})
                 continue
             record = self.store.read_json(rel)
             trajectory = Trajectory.model_validate(record["trajectory"])
             if trajectory.termination_reason == "error":
-                skipped.append({"problem_id": problem.problem_id, "run_id": run, "reason": trajectory.error})
+                skipped.append({"problem_id": problem.problem_id, "reason": trajectory.error})
                 continue
             step_rows.extend(step_metric_rows(trajectory))
             step_records.extend(
@@ -303,7 +294,6 @@ class ExperimentRunner:
             rows.append(
                 {
                     "problem_id": problem.problem_id,
-                    "run_id": run,
                     "split": split,
                     "features": extract_features(trajectory),
                     "label": record["grade"]["label"],
@@ -313,15 +303,15 @@ class ExperimentRunner:
                 }
             )
         if skipped:
-            logger.warning("runs without features", extra={"count": len(skipped), "runs": skipped[:20]})
+            logger.warning("problems without features", extra={"count": len(skipped), "problems": skipped[:20]})
         self.store.write_json(f"{out_dir}/step_metrics.json", step_rows)
         self.store.write_jsonl(f"{out_dir}/steps.jsonl", step_records)
         self.store.write_json(f"{out_dir}/features.json", rows)
-        self.store.write_json(f"{out_dir}/skipped_runs.json", skipped)
-        logger.info("scored", extra={"runs": len(rows), "skipped": len(skipped)})
+        self.store.write_json(f"{out_dir}/skipped.json", skipped)
+        logger.info("scored", extra={"problems": len(rows), "skipped": len(skipped)})
 
     def _matrix(self, split: str) -> tuple[np.ndarray, np.ndarray, list[dict[str, Any]]]:
-        """One row per (problem, run) of `split`."""
+        """One row per problem of `split`."""
         rows = [r for r in self.store.read_json(f"{self.scored_dir()}/features.json") if r["split"] == split]
         order = get_settings().features.order
         Z = np.array([[r["features"][f] for f in order] for r in rows], dtype=float).reshape(len(rows), len(order))
@@ -378,7 +368,6 @@ class ExperimentRunner:
                 split_res["predictions"][name] = [
                     {
                         "problem_id": r["problem_id"],
-                        "run_id": r["run_id"],
                         "label": int(t),
                         "p_incorrect": float(a),
                         "posterior_entropy": float(b),
