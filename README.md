@@ -8,10 +8,14 @@ GPU (vLLM generation needs Linux). Apple Silicon and CPU are enough for developm
 
 ```bash
 git clone <repo-url> && cd SPUMA
-scripts/install-dependencies.sh            # picks the torch build: cu126/cu128/cu130 from nvcc, mps on macOS, else cpu
+scripts/install-dependencies.sh            # picks the torch build: cu126/cu128/cu130 from nvcc (else nvidia-smi), mps on macOS, else cpu
 scripts/install-dependencies.sh --vllm     # Linux + NVIDIA: vLLM backend (brings its own pinned torch)
+scripts/install-dependencies.sh --index https://mirror/simple   # everything, torch too, from a PyPI mirror
 cp .env.example .env                       # then set HF_TOKEN (Hugging Face Hub access)
 ```
+
+Downloads use a 30-minute read timeout (`UV_HTTP_TIMEOUT=1800`; set it to override), since torch and vLLM
+wheels are GBs and a caching mirror fetches an uncached file before it sends a byte.
 
 `.env` holds secrets only and is git-ignored; everything else is configuration (below).
 
