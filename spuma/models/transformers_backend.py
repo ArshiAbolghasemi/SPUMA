@@ -65,7 +65,6 @@ class TransformersBackend:
             full_vocabulary_logprobs=True,
             teacher_forced_scoring=True,
             full_vocabulary_scoring=True,
-            tool_calling=True,
         )
 
     def __init__(self, model: Any, tokenizer: Any, config: ModelConfig) -> None:
@@ -122,8 +121,8 @@ class TransformersBackend:
 
     # --- generation ------------------------------------------------------------------------------
 
-    def render(self, messages: Sequence[BaseMessage], tools: list[dict[str, Any]] | None) -> list[int]:
-        return self.chat.render(messages, tools)
+    def render(self, messages: Sequence[BaseMessage]) -> list[int]:
+        return self.chat.render(messages)
 
     @torch.inference_mode()
     def generate(self, request: GenerationRequest) -> list[GenerationResult]:
@@ -219,9 +218,6 @@ class TransformersBackend:
 
     def count_tokens(self, text: str) -> int:
         return self.chat.count_tokens(text)
-
-    def truncate(self, text: str, max_tokens: int) -> str:
-        return self.chat.truncate(text, max_tokens)
 
     def close(self) -> None:
         del self.model

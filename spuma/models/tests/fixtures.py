@@ -6,7 +6,6 @@ CPU), and a scripted backend that replays fixed outputs for workflow tests.
 
 import math
 from collections.abc import Sequence
-from typing import Any
 
 import pytest
 import torch
@@ -30,13 +29,12 @@ from spuma.models.transformers_backend import TransformersBackend
 
 CORPUS = [
     "Solve for x: 2x + 3 = 7. The answer is \\boxed{2}.",
-    '<tool_call>{"name": "sympy_solve", "arguments": {"equations": ["x**2 - 4"]}}</tool_call>',
+    "Let x**2 - 4 = 0, so x = 2 or x = -2.",
     "Review the solution, verify calculations and give the final answer.",
-    "<|im_start|> <|im_end|> system user assistant tool <think> </think>",
+    "<|im_start|> <|im_end|> system user assistant <think> </think>",
 ] * 20
 
 CHAT_TEMPLATE = (
-    "{% if tools %}<|im_start|>system\n# Tools\n{% for t in tools %}{{ t | tojson }}\n{% endfor %}<|im_end|>\n{% endif %}"
     "{% for m in messages %}<|im_start|>{{ m['role'] }}\n{{ m['content'] }}<|im_end|>\n{% endfor %}"
     "{% if add_generation_prompt %}<|im_start|>assistant\n{% endif %}"
 )
@@ -93,7 +91,6 @@ ALL_CAPABILITIES = BackendCapabilities(
     full_vocabulary_logprobs=True,
     teacher_forced_scoring=True,
     full_vocabulary_scoring=True,
-    tool_calling=True,
 )
 
 
@@ -123,15 +120,13 @@ class ScriptedBackend:
         self.scorer_id = scorer_id(model, kind)
         self.info = BackendInfo(kind, model.name, None, model.name, None, "tmpl", 128, False, "float32", None)
         self.prompts: list[str] = []
-        self.tools_seen: list[list[str]] = []
         self.calls: list[GenerationRequest] = []
         self.score_calls: list[tuple[list[int], list[int], bool]] = []
         self.closed = False
 
-    def render(self, messages: Sequence[BaseMessage], tools: list[dict[str, Any]] | None) -> list[int]:
+    def render(self, messages: Sequence[BaseMessage]) -> list[int]:
         text = "\n".join(f"{m['role']}: {m['content']}" for m in to_chat_dicts(messages))
         self.prompts.append(text)
-        self.tools_seen.append([t["function"]["name"] for t in tools or []])
         return [ord(c) for c in text]
 
     def generate(self, request: GenerationRequest) -> list[GenerationResult]:
@@ -179,9 +174,6 @@ class ScriptedBackend:
 
     def count_tokens(self, text: str) -> int:
         return len(text)
-
-    def truncate(self, text: str, max_tokens: int) -> str:
-        return text[:max_tokens]
 
     def close(self) -> None:
         self.closed = True

@@ -6,7 +6,7 @@ requests that arrive within a short window and sends them to the wrapped backend
 together (its offline `LLM` must not be called from several threads at once). Results go back to
 each caller unchanged; requests keep their own seeds and sampling parameters.
 
-Tokenizer calls (`render`, `count_tokens`, `truncate`) are serialized: Hugging Face fast tokenizers
+Tokenizer calls (`render`, `count_tokens`) are serialized: Hugging Face fast tokenizers
 can fail with "Already borrowed" when used from several threads at once.
 """
 
@@ -107,17 +107,13 @@ class MicroBatcher:
 
     # --- everything else: delegated ------------------------------------------------------------
 
-    def render(self, messages: Sequence[BaseMessage], tools: list[dict[str, Any]] | None) -> list[int]:
+    def render(self, messages: Sequence[BaseMessage]) -> list[int]:
         with self._tokenizer_lock:
-            return self.backend.render(messages, tools)
+            return self.backend.render(messages)
 
     def count_tokens(self, text: str) -> int:
         with self._tokenizer_lock:
             return self.backend.count_tokens(text)
-
-    def truncate(self, text: str, max_tokens: int) -> str:
-        with self._tokenizer_lock:
-            return self.backend.truncate(text, max_tokens)
 
     def score(self, prompt_ids: list[int], token_ids: list[int], full_vocabulary: bool) -> TokenScores:
         return self.backend.score(prompt_ids, token_ids, full_vocabulary)

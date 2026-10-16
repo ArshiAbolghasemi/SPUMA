@@ -5,7 +5,7 @@ UQLM's clusterer asks its NLI object, for pairs of texts, whether they mean the 
   - both texts contain a \\boxed{} answer: equivalent iff the last answers are equivalent by math-verify
     (either direction, like UQLM's either-direction entailment) -- exact, and immune to NLI truncation;
   - exactly one does: not equivalent (one commits to an answer, the other does not);
-  - neither does (tool calls, unfinished reasoning): the wrapped NLI model decides, unchanged.
+  - neither does (unfinished reasoning, no boxed answer): the wrapped NLI model decides, unchanged.
 Samples are only compared with each other; the reference answer is never involved.
 """
 

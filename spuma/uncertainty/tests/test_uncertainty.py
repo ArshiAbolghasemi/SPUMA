@@ -26,9 +26,9 @@ from spuma.uncertainty.estimators import (
     score_trajectory,
     step_metric_rows,
 )
-from spuma.uncertainty.features import extract_features, tool_metadata
+from spuma.uncertainty.features import extract_features
 
-CALL = '<tool_call>{"name": "sympy_solve", "arguments": {"equations": ["x = 2"]}}</tool_call>'
+UNBOXED = "Let me check whether x = 2"  # no boxed answer, ends in 2
 
 
 def _step(agent="solver", step_id=0, ids=(1, 2, 3, 4), lps=(-0.1, -0.2, -0.3, -0.4), ents=(1.0, 2.0, 3.0, 4.0), **kw):
@@ -37,8 +37,6 @@ def _step(agent="solver", step_id=0, ids=(1, 2, 3, 4), lps=(-0.1, -0.2, -0.3, -0
         agent_id=agent,
         step_id=step_id,
         input_messages=[],
-        tools_offered=[],
-        tool_schemas=[],
         prompt_ids=[9, 9],
         generation_params={"max_new_tokens": 16},
         seed=0,
@@ -70,7 +68,7 @@ def test_missing_scores_raise_instead_of_fabricating():
 
 def test_real_backend_pe_nll_alignment(tiny_backend):
 
-    prompt = tiny_backend.render([HumanMessage("Solve for x")], None)
+    prompt = tiny_backend.render([HumanMessage("Solve for x")])
     request = GenerationRequest(prompt, GenerationConfig(temperature=0.7, max_new_tokens=6), seed=3, logprobs="full")
     (g,) = tiny_backend.generate(request)
     s = _step(ids=g.token_ids, lps=g.token_logprobs, ents=g.token_entropies)
@@ -101,11 +99,11 @@ def _sampled(backend, step=None):
 def test_semantic_entropy_uses_uqlm_on_step_text_plus_samples(scripted_backend_cls, rule_nli, with_uq):
     # equivalence: nli (rule NLI stand-in); step text "t" has no number, so it forms its own cluster
     with_uq("semantic_entropy", equivalence="nli")
-    samples = ["\\boxed{2}"] * 5 + ["so it is 2.0"] * 2 + ["\\boxed{3}"] * 2 + [CALL]
+    samples = ["\\boxed{2}"] * 5 + ["so it is 2.0"] * 2 + ["\\boxed{3}"] * 2 + [UNBOXED]
     backend = scripted_backend_cls([], samples={"": samples})
     step = _sampled(backend)
     value, details = SemanticEntropy().estimate(step)
-    # 11 texts: {t}, {2 x5, 2.0 x2, tool call ending in "x = 2"}, {3 x2}  ->  1/11, 8/11, 2/11
+    # 11 texts: {t}, {2 x5, 2.0 x2, unboxed text ending in "x = 2"}, {3 x2}  ->  1/11, 8/11, 2/11
     p = [1 / 11, 8 / 11, 2 / 11]
     assert value == pytest.approx(-sum(x * math.log(x) for x in p))
     assert details["semantic_negentropy"] == pytest.approx(1 - value / math.log(11))
@@ -114,7 +112,7 @@ def test_semantic_entropy_uses_uqlm_on_step_text_plus_samples(scripted_backend_c
     assert call.n == 10 and call.prompt_ids == step.prompt_ids and call.params.top_k is None
     assert call.logprobs == "none"  # samples are never scored
     stored = step.uq_details["se_samples"]
-    assert stored["policy"]["tool_call_policy"] == "no_execution" and stored["policy"]["nli_model"]
+    assert stored["policy"]["nli_model"]
     assert step.token_ids == [1, 2, 3, 4] and step.text == "t"  # main trajectory untouched
 
 
@@ -236,22 +234,9 @@ def test_aggregation_known_values():
 
 
 def _trajectory():
-    def trace(agent, metrics_list, records=()):
-        steps = []
-        for i, m in enumerate(metrics_list):
-            s = _step(agent=agent, step_id=i, metrics=m)
-            if i == 0:
-                s.tool_records = list(records)
-            steps.append(s)
-        return AgentTrace(
-            agent_id=agent,
-            role=agent,
-            model="m",
-            allowed_tools=[],
-            effective_tools=[],
-            steps=steps,
-            stop_reason="final_message",
-        )
+    def trace(agent, metrics_list):
+        steps = [_step(agent=agent, step_id=i, metrics=m) for i, m in enumerate(metrics_list)]
+        return AgentTrace(agent_id=agent, role=agent, model="m", steps=steps)
 
     m = lambda pe, se, nll, ln: {"pe": pe, "se": se, "nll": nll, "length": ln}  # noqa: E731
     return Trajectory(
@@ -259,7 +244,7 @@ def _trajectory():
         problem="q",
         final_answer_text="\\boxed{2}",
         agents=[
-            trace("solver", [m(3, 0, 1, 10), m(4, 0, 1, 30)], [{"tool": "sympy_solve", "status": "success"}]),
+            trace("solver", [m(3, 0, 1, 10), m(4, 0, 1, 30)]),
             trace("reviewer", [m(1, 1, 2, 5)]),
         ],
     )
@@ -271,12 +256,6 @@ def test_features_order_and_values(config):
     assert feats["solver_pe"] == pytest.approx(math.sqrt(12.5))
     assert feats["solver_length"] == 20  # mean, not RMS
     assert feats["reviewer_nll"] == 2
-
-
-def test_tool_metadata_separate_from_features(config):
-    meta = tool_metadata(_trajectory())
-    assert meta["solver"]["tool_calls"] == 1 and meta["reviewer"]["tool_calls"] == 0
-    assert not any("tool" in k for k in extract_features(_trajectory()))
 
 
 def test_aggregate_unknown_strategy(config, set_settings):
@@ -300,9 +279,8 @@ def test_score_trajectory_and_rows(config, scripted_backend_cls):
     scored = score_trajectory(traj, build_estimators(), scorers)
     rows = step_metric_rows(scored)
     assert set(rows[0]["metrics"]) == {"pe", "se", "nll", "length"}
-    assert rows[0]["tool_calls"] == [{"tool": "sympy_solve", "status": "success"}]
     assert traj.agents[0].steps[0].metrics == {}  # input not mutated
-    assert len(backend.calls) == 3  # one 10-sample SE request per step, no tool execution
+    assert len(backend.calls) == 3  # one 10-sample SE request per step
 
 
 def _fake_nli(monkeypatch, id2label, probs):
@@ -334,7 +312,7 @@ def test_answer_aware_equivalence_uses_math_verify_then_nli(rule_nli):
         ["Different words entirely, \\boxed{0.5}"] * 3  # same answer, other text: math-verify merges
         + ["\\boxed{1/2}"]
         + ["Hence \\boxed{2}"] * 2  # a different answer
-        + [CALL] * 2  # no boxed answer: NLI decides (rule NLI: both end in 2 -> same)
+        + [UNBOXED] * 2  # no boxed answer: NLI decides (rule NLI: both end in 2 -> same)
         + ["ran out of tokens at step 7", "ran out of tokens at step 9"]  # NLI: different final numbers
     )
     value, details = SemanticEntropy().from_texts(step, samples)

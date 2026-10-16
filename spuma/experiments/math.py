@@ -1,6 +1,6 @@
-"""MATH (EleutherAI/hendrycks_math) with two Qwen3-8B agents: Solver -> Reviewer, each with its SymPy tools.
+"""MATH (EleutherAI/hendrycks_math) with two Qwen3-8B agents: Solver -> Reviewer, one model call each.
 
-Everything else (splits, backends, tool permissions, uncertainty, SPN, evaluation) is in its settings file.
+Everything else (splits, backends, prompts, uncertainty, SPN, evaluation) is in its settings file.
 """
 
 from spuma.config import PROJECT_ROOT

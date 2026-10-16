@@ -1,6 +1,6 @@
 """An experiment: a name plus the settings file it runs with.
 
-The settings file holds everything that defines the experiment (`dataset:`, `model:`, `agents:`, tools,
+The settings file holds everything that defines the experiment (`dataset:`, `model:`, `agents:`,
 uncertainty, SPN, evaluation, and `experiment.name`, its artifact directory). `ExperimentRunner` is generic;
 an experiment that needs code of its own (a dataset provider or grader the registries do not offer)
 subclasses `Experiment` and overrides `runner()`.

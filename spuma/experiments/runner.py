@@ -1,6 +1,6 @@
 """Experiment execution: generate -> score -> train -> evaluate.
 
-Each agent uses its own `allowed_tools` from the settings. With a hybrid backend setup
+Each agent answers in one model call. With a hybrid backend setup
 (`model.backend: vllm`, `model.scoring_backend: transformers`) the generation engines are released
 after the generate phase, so the scoring engine never shares the GPU with them.
 
@@ -9,17 +9,17 @@ after the generate phase, so the scoring engine never shares the GPU with them.
       splits.json                      problem ids per split
       runs/<run_id>.json               reproducibility metadata of each invocation
       generation-<gen fp>/
-        trajectories/<problem>.json    raw trajectory (exact contexts, tokens, tool records, generation-time
-                                       scores, semantic-entropy samples) + grade
+        trajectories/<problem>.json    raw trajectory (exact contexts, tokens, generation-time scores,
+                                       semantic-entropy samples) + grade
         scored-<scoring fp>/
           steps/<problem>.json         trajectory with step metrics and semantic-entropy samples
           step_metrics.json            per-step metric rows
-          features.json                Z (8 features), label Y, parse failure, tool metadata
+          features.json                Z (8 features), label Y, parse failure
           models/<name>.pt             risk-model checkpoints (evaluation.risk_models; today: spn)
           evaluation.json              risk models on validation/test
       summary.json                     test accuracy and risk-model metrics
 
-Fingerprints in directory names (generation: model/backend/sampling/agents/tools/SE settings;
+Fingerprints in directory names (generation: model/backend/sampling/agents/SE settings;
 scoring: scoring engine + UQ/aggregation/feature settings) mean a config change never reuses stale
 artifacts; with `experiment.resume`, existing artifacts are reused instead of recomputed.
 """
@@ -54,8 +54,6 @@ from spuma.models.batching import MicroBatcher
 from spuma.models.config import ModelConfig
 from spuma.models.engines import get_backend, release_backends
 from spuma.models.validation import validate_backends
-from spuma.tools.registry import ToolExecutor, ToolProvider, build_tool_registry, default_providers
-from spuma.tools.worker import IsolatedRunner
 from spuma.uncertainty.estimators import (
     SemanticSampler,
     build_estimators,
@@ -63,7 +61,7 @@ from spuma.uncertainty.estimators import (
     score_trajectory,
     step_metric_rows,
 )
-from spuma.uncertainty.features import extract_features, tool_metadata
+from spuma.uncertainty.features import extract_features
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +76,6 @@ class ExperimentRunner:
         self,
         dataset: DatasetProvider | None = None,
         backend_factory: Callable[[ModelConfig, str], ModelBackend] = get_backend,
-        providers: dict[str, ToolProvider] | None = None,
         grader: AnswerGrader | None = None,
         release: Callable[[], None] = release_backends,
     ) -> None:
@@ -86,8 +83,6 @@ class ExperimentRunner:
         self.release = release
         self.dataset = dataset or get_dataset()
         self.backend_factory = backend_factory
-        self._runner = IsolatedRunner() if providers is None else None
-        self.providers = providers if providers is not None else default_providers(self._runner)
         self.grader = grader or get_grader()
         self.store = FileArtifactStore(PROJECT_ROOT / config.experiment.output_dir / config.experiment.name)
         self.run_id = f"{datetime.now(UTC):%Y%m%dT%H%M%S}-{uuid.uuid4().hex[:6]}"
@@ -108,23 +103,19 @@ class ExperimentRunner:
         plan = validate_backends()
         self.store.write_json("config.json", get_settings().sanitized())
         self.store.write_json(f"runs/{self.run_id}.json", self.metadata(phases, limit, plan))
-        try:
-            if "generate" in phases:
-                self.write_splits(limit)
-                logger.info("generate", extra={"dir": self.generation_dir()})
-                self.generate()
-                if self._hybrid():
-                    logger.info("releasing generation engines before scoring (hybrid backends)")
-                    self.release()
-            if "score" in phases:
-                self.score()
-            if "train" in phases:
-                self.train()
-            if "evaluate" in phases:
-                self.evaluate()
-        finally:
-            if self._runner:
-                self._runner.close()
+        if "generate" in phases:
+            self.write_splits(limit)
+            logger.info("generate", extra={"dir": self.generation_dir()})
+            self.generate()
+            if self._hybrid():
+                logger.info("releasing generation engines before scoring (hybrid backends)")
+                self.release()
+        if "score" in phases:
+            self.score()
+        if "train" in phases:
+            self.train()
+        if "evaluate" in phases:
+            self.evaluate()
 
     def _hybrid(self) -> bool:
         return any(not m.scores_at_generation for m in get_settings().all_models().values())
@@ -143,7 +134,6 @@ class ExperimentRunner:
             "langgraph",
             "langchain-core",
             "spflow",
-            "sympy",
             "math-verify",
         ]
         se = get_settings().uncertainty.semantic_entropy
@@ -163,7 +153,6 @@ class ExperimentRunner:
                 "top_k": None,
                 "temperature": se.temperature,
                 "top_p": se.top_p,
-                "tool_call_policy": se.tool_call_policy,
                 "clustering": "uqlm",
                 "nli_model": se.nli_model_name,
             },
@@ -217,10 +206,7 @@ class ExperimentRunner:
             backends = {a: batchers.setdefault(id(b), MicroBatcher(b)) for a, b in backends.items()}
         se_enabled = get_settings().uncertainty.semantic_entropy.enabled
         samplers = {a: SemanticSampler(b) for a, b in backends.items()} if se_enabled else {}
-        registry = build_tool_registry(self.providers)
-        first = next(iter(backends.values()))
-        executor = ToolExecutor(registry, truncate=first.truncate)
-        workflow = build_workflow(registry, backends.__getitem__, executor)
+        workflow = build_workflow(backends.__getitem__)
         self.store.write_json(f"{self.generation_dir()}/agents.json", [a.describe() for a in workflow.agents])
 
         pending, done = [], 0
@@ -243,7 +229,7 @@ class ExperimentRunner:
         logger.info("generate", extra={"pending": len(pending), "already_done": done, "concurrent": concurrency})
 
         def run_problem(problem: Problem, trajectory: Trajectory | None) -> Trajectory:
-            # Worker thread: model and tool calls only. Only the id and the problem text enter the workflow.
+            # Worker thread: model calls only. Only the id and the problem text enter the workflow.
             if trajectory is None:
                 trajectory = workflow.run(problem.problem_id, problem.problem)
             for trace in trajectory.agents:
@@ -292,7 +278,6 @@ class ExperimentRunner:
                     "features": extract_features(trajectory),
                     "label": record["grade"]["label"],
                     "parse_failure": record["grade"]["parse_failure"],
-                    "tool_metadata": tool_metadata(trajectory),
                 }
             )
         self.store.write_json(f"{out_dir}/step_metrics.json", step_rows)

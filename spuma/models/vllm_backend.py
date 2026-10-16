@@ -90,7 +90,6 @@ class VLLMBackend:
             full_vocabulary_logprobs=full,
             teacher_forced_scoring=True,
             full_vocabulary_scoring=full,
-            tool_calling=True,  # Qwen3 chat template with tools + the shared Hermes-style parser
         )
 
     def __init__(
@@ -188,8 +187,8 @@ class VLLMBackend:
 
     # --- generation ------------------------------------------------------------------------------
 
-    def render(self, messages: Sequence[BaseMessage], tools: list[dict[str, Any]] | None) -> list[int]:
-        return self.chat.render(messages, tools)
+    def render(self, messages: Sequence[BaseMessage]) -> list[int]:
+        return self.chat.render(messages)
 
     def generate(self, request: GenerationRequest) -> list[GenerationResult]:
         return self.generate_batch([request])[0]
@@ -301,9 +300,6 @@ class VLLMBackend:
 
     def count_tokens(self, text: str) -> int:
         return self.chat.count_tokens(text)
-
-    def truncate(self, text: str, max_tokens: int) -> str:
-        return self.chat.truncate(text, max_tokens)
 
     def close(self) -> None:
         llm, self.llm = self.llm, None

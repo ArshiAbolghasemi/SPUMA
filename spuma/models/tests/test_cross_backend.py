@@ -42,8 +42,8 @@ def compare(t_backend, v_backend, prompt_ids, continuation):
 
 def test_offline_vllm_path_matches_transformers(tiny_backend, vllm_backend):
     msgs = [SystemMessage("sys"), HumanMessage("Solve 2x+3=7")]
-    prompt = tiny_backend.render(msgs, None)
-    assert vllm_backend.render(msgs, None) == prompt  # identical tokenization and chat template
+    prompt = tiny_backend.render(msgs)
+    assert vllm_backend.render(msgs) == prompt  # identical tokenization and chat template
     assert vllm_backend.info.compatibility_key() == tiny_backend.info.compatibility_key()
     continuation = tiny_backend.chat.encode("The answer is \\boxed{2}.") + [tiny_backend.chat.tokenizer.eos_token_id]
     t, v, stats = compare(tiny_backend, vllm_backend, prompt, continuation)
@@ -63,12 +63,12 @@ def test_real_vllm_matches_transformers_qwen3_small():
     )
     msgs = [SystemMessage("Solve step by step."), HumanMessage("What is 12 * 7?")]
     vllm_b = get_backend(cfg, "vllm")
-    prompt = vllm_b.render(msgs, None)
+    prompt = vllm_b.render(msgs)
     continuation = vllm_b.chat.encode("12 * 7 = 84. The answer is \\boxed{84}.")
     v = vllm_b.score(prompt, continuation, full_vocabulary=True)
     release_backends("vllm")
     tf_b = get_backend(cfg, "transformers")
-    assert tf_b.render(msgs, None) == prompt and tf_b.info.compatibility_key() == vllm_b.info.compatibility_key()
+    assert tf_b.render(msgs) == prompt and tf_b.info.compatibility_key() == vllm_b.info.compatibility_key()
     t = tf_b.score(prompt, continuation, full_vocabulary=True)
     d_lp = np.abs(np.array(t.token_logprobs) - np.array(v.token_logprobs))
     d_h = np.abs(np.array(t.token_entropies) - np.array(v.token_entropies))
@@ -83,7 +83,7 @@ def test_real_vllm_matches_transformers_qwen3_small():
 def test_real_vllm_qwen3_8b_sampling_and_logprobs():
 
     backend = get_backend(ModelConfig(backend="vllm"), "vllm")
-    prompt = backend.render([HumanMessage("What is 2+2? Answer with \\boxed{}.")], None)
+    prompt = backend.render([HumanMessage("What is 2+2? Answer with \\boxed{}.")])
     params = GenerationConfig(temperature=0.7, top_p=0.9, max_new_tokens=64)
     samples = backend.generate(GenerationRequest(prompt, params, seed=0, n=10))
     assert len(samples) == 10

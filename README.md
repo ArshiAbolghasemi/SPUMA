@@ -29,7 +29,7 @@ Each experiment is a module in `spuma/experiments/` that names its settings file
 
 A settings file defines everything about its experiment: dataset and splits, model and backends
 (`model.backend` for generation, `model.scoring_backend` for teacher-forced scoring), agents and their
-tools, uncertainty estimation, SPN, evaluation, and `experiment.name` (its artifact directory). Any value
+prompts, uncertainty estimation, SPN, evaluation, and `experiment.name` (its artifact directory). Any value
 can be overridden from the environment with the `SPUMA_` prefix and `__` for nesting, e.g.
 `SPUMA_MODEL__BACKEND=transformers` or `SPUMA_DATASET__TEST_SAMPLES=50`.
 
@@ -65,7 +65,7 @@ results, and with `experiment.resume: true` an interrupted run continues where i
 ```
 artifacts/<experiment.name>/
   splits.json, config.json, summary.json, runs/<run_id>.json
-  generation-<fp>/trajectories/<problem>.json            agent steps, tool calls, semantic-entropy samples, grade
+  generation-<fp>/trajectories/<problem>.json            agent steps, semantic-entropy samples, grade
   generation-<fp>/scored-<fp>/steps/<problem>.json       + per-step metrics and token scores
   generation-<fp>/scored-<fp>/step_metrics.json          one row per step
   generation-<fp>/scored-<fp>/features.json              features Z, label Y, per problem

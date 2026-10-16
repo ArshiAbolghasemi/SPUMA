@@ -33,7 +33,6 @@ class BackendCapabilities:
     full_vocabulary_logprobs: bool = False  # raw full distribution at each generated position
     teacher_forced_scoring: bool = False  # log p of a given continuation after a given prompt
     full_vocabulary_scoring: bool = False  # ... plus the full distribution at each scored position
-    tool_calling: bool = False  # tool schemas in the prompt + Qwen3 tool-call parsing
 
     def missing(self, *names: str) -> list[str]:
         known = {f.name for f in fields(self)}
@@ -123,10 +122,8 @@ class TokenScores:
 
 @dataclass(frozen=True)
 class ParsedOutput:
-    content: str  # text with reasoning and tool-call markup removed
+    content: str  # text with the reasoning removed
     reasoning: str
-    tool_calls: list[dict[str, Any]]  # {"name", "args", "id"}
-    invalid_tool_calls: list[dict[str, Any]]  # {"name", "args" (raw str), "id", "error"}
 
 
 @runtime_checkable
@@ -136,8 +133,8 @@ class ModelBackend(Protocol):
     capabilities: BackendCapabilities
     scorer_id: str
 
-    def render(self, messages: Sequence[BaseMessage], tools: list[dict[str, Any]] | None) -> list[int]:
-        """Prompt token ids (chat template + tool schemas + generation prompt): the exact model input."""
+    def render(self, messages: Sequence[BaseMessage]) -> list[int]:
+        """Prompt token ids (chat template + generation prompt): the exact model input."""
         ...
 
     def generate(self, request: GenerationRequest) -> list[GenerationResult]:
@@ -151,8 +148,6 @@ class ModelBackend(Protocol):
     def parse(self, text: str) -> ParsedOutput: ...
 
     def count_tokens(self, text: str) -> int: ...
-
-    def truncate(self, text: str, max_tokens: int) -> str: ...
 
     def close(self) -> None: ...
 

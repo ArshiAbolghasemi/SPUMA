@@ -5,7 +5,7 @@
 #   scripts/run-tests.sh --all                            # include gpu (Qwen3-8B), vllm and nli tests
 #   scripts/run-tests.sh -m vllm                          # only the vLLM / cross-backend tests (Linux + GPU)
 #   scripts/run-tests.sh -m nli                           # only the real DeBERTa-MNLI semantic-entropy test
-#   scripts/run-tests.sh spuma/tools -k allowlist -x
+#   scripts/run-tests.sh spuma/spn -k histogram -x
 set -euo pipefail
 cd "$(dirname "$0")/.."
 all=0

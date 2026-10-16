@@ -17,7 +17,7 @@ GREEDY = GenerationConfig(temperature=0.0, max_new_tokens=6)
 
 
 def _prompt(b):
-    return b.render([HumanMessage("Solve 2x+3=7")], None)
+    return b.render([HumanMessage("Solve 2x+3=7")])
 
 
 def test_capabilities_require_installed_vllm(monkeypatch):

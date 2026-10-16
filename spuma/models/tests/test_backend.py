@@ -54,10 +54,10 @@ def test_engine_reuse_and_release(monkeypatch):
 
 def test_require_and_missing():
     caps = BackendCapabilities(generation=True)
-    assert caps.missing("generation", "tool_calling") == ["tool_calling"]
+    assert caps.missing("generation", "teacher_forced_scoring") == ["teacher_forced_scoring"]
     backend = type("B", (), {"name": "b", "capabilities": caps})()
-    with pytest.raises(BackendCapabilityError, match="tool_calling"):
-        require(backend, "tool_calling")
+    with pytest.raises(BackendCapabilityError, match="teacher_forced_scoring"):
+        require(backend, "teacher_forced_scoring")
     with pytest.raises(ValueError):
         caps.missing("teleport")
 
@@ -117,16 +117,9 @@ def test_execution_plan_modes(with_model, backend, scoring, gen_req, score_req):
     with_model(backend=backend, scoring_backend=scoring)
     plan = execution_plan()["default"]
     assert plan["agents"] == ["solver", "reviewer"]
-    assert {"generation", "tool_calling", "multiple_completions"} <= plan["generation_requires"]
+    assert {"generation", "multiple_completions"} <= plan["generation_requires"]
     assert gen_req <= plan["generation_requires"] and plan["scoring_requires"] == score_req
     assert not ({"full_vocabulary_logprobs"} <= plan["generation_requires"]) or scoring == "same"
-
-
-def test_execution_plan_requires_tool_calling_only_with_tools(config, set_settings):
-    assert "tool_calling" in execution_plan()["default"]["generation_requires"]
-    items = [dataclasses.replace(a, allowed_tools=[]) for a in config.agents.items]
-    set_settings(dataclasses.replace(config, agents=dataclasses.replace(config.agents, items=items)))
-    assert "tool_calling" not in execution_plan()["default"]["generation_requires"]
 
 
 def test_validation_passes_for_transformers(with_model):

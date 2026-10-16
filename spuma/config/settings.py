@@ -6,7 +6,7 @@ huggingface_hub picks the token up. It is not a settings field.
 Dynaconf only loads and merges the sources; `Settings` embeds one frozen config dataclass per
 package (`<package>/config.py`) and is the single object the rest of the code reads, through the
 cached `get_settings()`. Each section validates itself in `__post_init__`; `Settings.__post_init__`
-checks the rules that span sections (tool permissions, feature order, model references).
+checks the rules that span sections (feature order, model references).
 """
 
 import dataclasses
@@ -21,7 +21,7 @@ from typing import Any
 from dotenv import load_dotenv
 from dynaconf import Dynaconf
 
-from spuma.agents.config import AgentConfig, AgentsConfig, OrchestrationConfig
+from spuma.agents.config import AgentConfig, AgentsConfig
 from spuma.common.config import LoggingConfig, build_config, to_plain
 from spuma.common.utils import stable_hash
 from spuma.dataset.config import DatasetConfig
@@ -29,7 +29,6 @@ from spuma.evaluation.config import EvaluationConfig
 from spuma.experiments.config import ExperimentConfig, ProjectConfig
 from spuma.models.config import GenerationConfig, ModelConfig
 from spuma.spn.config import SPNConfig
-from spuma.tools.config import ToolsConfig
 from spuma.uncertainty.config import SAMPLING_FIELDS, AggregationConfig, FeaturesConfig, UncertaintyConfig
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -50,8 +49,6 @@ class Settings:
     experiment: ExperimentConfig = field(default_factory=ExperimentConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
     models: dict[str, ModelConfig] = field(default_factory=dict)  # extra named models; `default` is `model`
-    orchestration: OrchestrationConfig = field(default_factory=OrchestrationConfig)
-    tools: ToolsConfig = field(default_factory=ToolsConfig)
     dataset: DatasetConfig = field(default_factory=DatasetConfig)
     uncertainty: UncertaintyConfig = field(default_factory=UncertaintyConfig)
     aggregation: AggregationConfig = field(default_factory=AggregationConfig)
@@ -71,7 +68,6 @@ class Settings:
         for a in agents:
             if a.model != "default" and a.model not in self.models:
                 raise ValueError(f"agent {a.id!r}: model {a.model!r} is not 'default' or a key of `models`")
-            self._check_tools(a.id, a.allowed_tools)
         expected = {f"{a.id}_{m}" for a in agents for m in self.uncertainty.enabled_metrics()}
         order = self.features.order
         if len(order) != len(set(order)) or set(order) != expected:
@@ -79,12 +75,6 @@ class Settings:
                 f"features.order must list each enabled <agent>_<metric> exactly once; "
                 f"expected {sorted(expected)}, got {order}"
             )
-
-    def _check_tools(self, owner: str, tools: list[str]) -> None:
-        unknown = [t for t in tools if t not in self.tools.registry]
-        if unknown:
-            raise ValueError(f"{owner}: allowed_tools {unknown} are not registered under tools.registry")
-        # Disabled tools may stay listed (runtime disabling); the executor refuses them.
 
     # --- (de)serialization -----------------------------------------------------------------------
 
@@ -110,12 +100,6 @@ class Settings:
     def generation_for(self, agent: AgentConfig) -> GenerationConfig:
         return agent.generation or self.model_for(agent).generation
 
-    def max_steps_for(self, agent: AgentConfig) -> int:
-        return agent.max_steps or self.orchestration.max_steps_per_agent
-
-    def max_tool_calls_for(self, agent: AgentConfig) -> int:
-        return agent.max_tool_calls if agent.max_tool_calls is not None else self.orchestration.max_tool_calls_per_agent
-
     # --- cache keys ------------------------------------------------------------------------------
 
     def fingerprint(self, *sections: str) -> str:
@@ -124,7 +108,7 @@ class Settings:
 
     def generation_fingerprint(self) -> str:
         """Cache key of the generate phase: trajectories, generation-time scores and semantic-entropy samples."""
-        data = {k: v for k, v in self.to_dict().items() if k in ("project", "agents", "orchestration", "tools")}
+        data = {k: v for k, v in self.to_dict().items() if k in ("project", "agents")}
         uq = self.uncertainty
         data["models"] = {k: m.generation_fingerprint() for k, m in self.all_models().items()}
         # only the sampling side of SE: changing the NLI model re-clusters stored samples, it does not resample
@@ -166,7 +150,7 @@ def load_settings(
         settings.model.name,
         settings.model.backend,
         settings.model.scoring_kind,
-        [(a.id, a.allowed_tools) for a in settings.agents.enabled],
+        [a.id for a in settings.agents.enabled],
     )
     return settings
 

@@ -81,7 +81,7 @@ class NegativeLogLikelihood:
 
 
 class TokenLength:
-    """Number of model-generated tokens in the step (shared tokenizer; tool output excluded)."""
+    """Number of model-generated tokens in the step (shared tokenizer)."""
 
     name = "length"
 
@@ -111,8 +111,7 @@ def semantic_policy() -> dict[str, Any]:
     config = _se()
     return {
         "n": config.n,
-        "context": "frozen pre-step prompt_ids incl. prior tool observations",
-        "tool_call_policy": config.tool_call_policy,
+        "context": "frozen pre-step prompt_ids",
         "top_k": None,
         "clustering": f"uqlm SemanticEntropy, equivalence={config.equivalence}",
         "clustered_texts": "the step's own text + its n samples",
@@ -129,8 +128,7 @@ def _sample_key(step: StepRecord) -> str:
 class SemanticSampler:
     """Draws the n alternatives of every step from its exact `prompt_ids`, one batched backend call per trajectory.
 
-    Sampled tool calls are never executed (`tool_call_policy: no_execution`) and the main trajectory is
-    only read, so sampling cannot change tool state or the recorded steps.
+    The main trajectory is only read, so sampling cannot change the recorded steps.
     """
 
     def __init__(self, backend: ModelBackend) -> None:
@@ -412,21 +410,19 @@ def score_trajectory(
                     "step_id": step.step_id,
                     "metrics": step.metrics,
                     "scored_by": step.scored_by,
-                    "tool_calls": [{"tool": r["tool"], "status": r["status"]} for r in step.tool_records],
                 },
             )
     return scored
 
 
 def step_metric_rows(trajectory: Trajectory) -> list[dict[str, Any]]:
-    """The per-step persistence format: problem, agent, step, metrics, tool-call summary."""
+    """The per-step persistence format: problem, agent, step, metrics."""
     return [
         {
             "problem_id": s.problem_id,
             "agent_id": s.agent_id,
             "step_id": s.step_id,
             "metrics": s.metrics,
-            "tool_calls": [{"tool": r["tool"], "status": r["status"]} for r in s.tool_records],
         }
         for a in trajectory.agents
         for s in a.steps

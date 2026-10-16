@@ -1,9 +1,8 @@
 """Persisted trajectory records.
 
 A *step* is one model call: one assistant message generated from a frozen context. Everything
-needed to replay it is kept (rendered messages, offered tool schemas, exact prompt token ids,
-generation parameters, seed). Tool results that follow a step are *observations*: they are stored
-in `tool_records` and enter the next step's prompt, never the step's generated tokens.
+needed to replay it is kept (rendered messages, exact prompt token ids, generation parameters, seed).
+Each agent makes exactly one step.
 """
 
 from typing import Any
@@ -16,8 +15,6 @@ class StepRecord(BaseModel):
     agent_id: str
     step_id: int
     input_messages: list[dict[str, Any]]  # chat-template dicts, the exact conversation rendered
-    tools_offered: list[str]
-    tool_schemas: list[dict[str, Any]]
     prompt_ids: list[int]  # exact model input
     generation_params: dict[str, Any]
     seed: int
@@ -30,27 +27,16 @@ class StepRecord(BaseModel):
     generation_meta: dict[str, Any] = Field(default_factory=dict)  # backend, finish reason, latency, ...
     content: str = ""
     reasoning: str = ""
-    tool_calls: list[dict[str, Any]] = Field(default_factory=list)
-    invalid_tool_calls: list[dict[str, Any]] = Field(default_factory=list)
-    tool_records: list[dict[str, Any]] = Field(default_factory=list)  # observations returned after this step
     metrics: dict[str, float] = Field(default_factory=dict)  # filled by spuma.uncertainty
     uq_details: dict[str, Any] = Field(default_factory=dict)  # semantic-entropy samples, clusters, policy
-
-    @property
-    def has_tool_calls(self) -> bool:
-        return bool(self.tool_calls or self.invalid_tool_calls)
 
 
 class AgentTrace(BaseModel):
     agent_id: str
     role: str
     model: str
-    allowed_tools: list[str]
-    effective_tools: list[str]
     steps: list[StepRecord] = Field(default_factory=list)
-    tool_calls_used: int = 0
     final_content: str = ""
-    stop_reason: str = ""  # final_message | max_steps
 
 
 class Trajectory(BaseModel):

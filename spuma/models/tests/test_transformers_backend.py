@@ -16,23 +16,18 @@ SAMPLE = GenerationConfig(temperature=0.7, top_p=0.9, max_new_tokens=8)
 
 
 def _prompt(backend):
-    return backend.render([SystemMessage("sys"), HumanMessage("Solve 2x+3=7")], None)
+    return backend.render([SystemMessage("sys"), HumanMessage("Solve 2x+3=7")])
 
 
 def test_protocol_and_info(tiny_backend):
     assert isinstance(tiny_backend, ModelBackend)
     assert tiny_backend.info.backend == "transformers" and tiny_backend.info.model == "tiny-qwen3"
-    assert tiny_backend.capabilities.full_vocabulary_scoring and tiny_backend.capabilities.tool_calling
+    assert tiny_backend.capabilities.full_vocabulary_scoring
 
 
 def test_render_uses_chat_template(tiny_backend, tokenizer):
     text = tokenizer.decode(_prompt(tiny_backend))
     assert text.startswith("<|im_start|>system\nsys<|im_end|>") and text.endswith("<|im_start|>assistant\n")
-
-
-def test_render_includes_tool_schemas(tiny_backend, tokenizer):
-    tools = [{"type": "function", "function": {"name": "sympy_solve", "parameters": {}}}]
-    assert "sympy_solve" in tokenizer.decode(tiny_backend.render([HumanMessage("q")], tools))
 
 
 def test_greedy_matches_hf_generate(tiny_backend, tiny_model):
@@ -118,9 +113,8 @@ def test_n_samples_need_temperature(tiny_backend):
         tiny_backend.generate(GenerationRequest(_prompt(tiny_backend), GREEDY, seed=0, n=2))
 
 
-def test_token_count_and_truncate(tiny_backend):
+def test_token_count(tiny_backend):
     assert tiny_backend.count_tokens("Solve for x") > 0
-    assert tiny_backend.truncate("Solve for x " * 50, 5).endswith("[truncated]")
 
 
 def test_close_releases_model(tiny_model, tokenizer):
@@ -133,7 +127,7 @@ def test_close_releases_model(tiny_model, tokenizer):
 @pytest.mark.gpu
 def test_qwen3_real_generation():
     backend = get_backend(ModelConfig(), "transformers")
-    prompt = backend.render([HumanMessage("What is 2+2? Answer with \\boxed{}.")], None)
+    prompt = backend.render([HumanMessage("What is 2+2? Answer with \\boxed{}.")])
     (gen,) = backend.generate(
         GenerationRequest(prompt, GenerationConfig(temperature=0.0, max_new_tokens=64), 0, logprobs="full")
     )

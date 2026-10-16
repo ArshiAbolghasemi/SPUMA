@@ -105,8 +105,7 @@ def main() -> None:
                 [
                     SystemMessage(agent.system_prompt),
                     HumanMessage(agent.user_template.format(problem=p.problem, previous="")),
-                ],
-                None,
+                ]
             )
             for p in problems
         ]

@@ -67,9 +67,9 @@ def test_cache_fingerprints_split_generation_and_scoring(config):
 
 def test_dynaconf_nested_env_override_is_typed(monkeypatch):
     monkeypatch.setenv("SPUMA_MODEL__GENERATION__TEMPERATURE", "0.2")
-    monkeypatch.setenv("SPUMA_TOOLS__REGISTRY__MATH_VERIFY__ENABLED", "false")
+    monkeypatch.setenv("SPUMA_DATASET__TEST_SAMPLES", "50")
     s = load_settings()
-    assert s.model.generation.temperature == 0.2 and s.tools.registry["math_verify"].enabled is False
+    assert s.model.generation.temperature == 0.2 and s.dataset.test_samples == 50
 
 
 def test_get_settings_is_cached_until_cleared(monkeypatch):
@@ -90,25 +90,19 @@ def test_settings_file_from_env(monkeypatch, tmp_path, raw_config):
 
 
 def test_unknown_and_missing_keys_name_the_path(raw_config):
-    raw_config["tools"]["registry"]["sympy_solve"]["imaeg"] = "x"
-    with pytest.raises(ValueError, match="tools.registry.sympy_solve.imaeg"):
+    raw_config["dataset"]["imaeg"] = "x"
+    with pytest.raises(ValueError, match="dataset.imaeg"):
         Settings.from_dict(raw_config)
-    del raw_config["tools"]["registry"]["sympy_solve"]["imaeg"]
+    del raw_config["dataset"]["imaeg"]
     del raw_config["agents"]["items"][0]["system_prompt"]
     with pytest.raises(ValueError, match=r"agents\.items\.0\.system_prompt"):
         Settings.from_dict(raw_config)
 
 
-def test_unregistered_tool_rejected(raw_config):
-    raw_config["agents"]["items"][0]["allowed_tools"].append("nonexistent_tool")
-    with pytest.raises((ValueError, TypeError), match="not registered"):
+def test_removed_tool_settings_rejected(raw_config):
+    raw_config["agents"]["items"][0]["allowed_tools"] = ["sympy_solve"]
+    with pytest.raises(ValueError, match="allowed_tools"):
         Settings.from_dict(raw_config)
-
-
-def test_empty_allowed_tools_ok(raw_config):
-    for a in raw_config["agents"]["items"]:
-        a["allowed_tools"] = []
-    Settings.from_dict(raw_config)
 
 
 def test_feature_order_must_match_agents(raw_config):
@@ -158,7 +152,7 @@ def test_sanitized_redacts_secrets(config):
         "a": {"api_key": "***", "hf_token": "***", "max_output_tokens": 1}
     }
     snap = config.sanitized()
-    assert snap["tools"]["execution"]["max_output_tokens"] == 1024
+    assert snap["dataset"]["test_samples"] == 500
     json.dumps(snap)  # JSON-able (paths as strings)
 
 

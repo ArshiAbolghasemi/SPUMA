@@ -6,7 +6,7 @@ from spuma.common.config import check_choice, check_range
 
 METRICS = ("pe", "se", "nll", "length")
 # Semantic-entropy fields that change the drawn samples (the rest only changes how they are clustered).
-SAMPLING_FIELDS = ("enabled", "n", "temperature", "top_p", "top_k", "max_new_tokens", "tool_call_policy")
+SAMPLING_FIELDS = ("enabled", "n", "temperature", "top_p", "top_k", "max_new_tokens")
 
 
 @dataclass(frozen=True)
@@ -36,8 +36,6 @@ class SemanticEntropyConfig:
     top_p: float = 0.9
     top_k: None = None  # top-k truncation is always disabled for semantic sampling
     max_new_tokens: int | None = None  # None: the agent's max_new_tokens
-    # Sampled tool calls are never executed; their text is clustered like any other continuation.
-    tool_call_policy: str = "no_execution"
     # when two of a step's texts are "the same": answer_aware = equivalent \boxed{} answers (math-verify) when
     # both texts box one, the NLI model otherwise; nli = the NLI model for every pair
     equivalence: str = "answer_aware"
@@ -56,7 +54,6 @@ class SemanticEntropyConfig:
         if self.top_k is not None:
             raise ValueError(f"{key}.top_k must be null: top-k truncation is disabled for semantic sampling")
         check_range(f"{key}.max_new_tokens", self.max_new_tokens, gt=0)
-        check_choice(f"{key}.tool_call_policy", self.tool_call_policy, ("no_execution",))
         check_range(f"{key}.nli_max_length", self.nli_max_length, gt=0)
         check_choice(f"{key}.equivalence", self.equivalence, ("answer_aware", "nli"))
         check_range(f"{key}.nli_max_tokens", self.nli_max_tokens, gt=0)

@@ -1,5 +1,5 @@
-"""End-to-end: MATH-like problems -> Solver/Reviewer with tools -> step UQ -> RMS -> 8 features + label
--> SPN train/infer -> AUROC/AUARC, with a deterministic fake model and the real math tools."""
+"""End-to-end: MATH-like problems -> Solver/Reviewer (one step each) -> step UQ -> RMS -> 8 features + label
+-> SPN train/infer -> AUROC/AUARC, with a deterministic fake model."""
 
 import json
 import math
@@ -13,8 +13,6 @@ from spuma.experiments.runner import ExperimentRunner
 from spuma.models.backend import BackendInfo, GenerationResult, TokenScores, scorer_id
 from spuma.models.chat import parse_qwen_output, to_chat_dicts
 from spuma.models.tests.fixtures import ALL_CAPABILITIES
-from spuma.tools.registry import default_providers
-from spuma.tools.worker import IsolatedRunner
 
 
 def _is_wrong(a: int, b: int) -> bool:
@@ -22,7 +20,7 @@ def _is_wrong(a: int, b: int) -> bool:
 
 
 class FakeMathModel:
-    """Solves 'What is A+B?' via sympy_simplify when offered tools; deliberately wrong on some problems,
+    """Answers 'What is A+B?'; deliberately wrong on some problems,
     with lower confidence and more diverse samples there, so uncertainty carries signal.
 
     Plays the `kind` engine (transformers or vllm) of `model`; scores are a deterministic function of
@@ -35,10 +33,9 @@ class FakeMathModel:
         self.scorer_id = scorer_id(model, kind)
         self.info = BackendInfo(kind, model.name, None, model.name, None, "tmpl", 128, False, "bf16", None)
 
-    def render(self, messages, tools):
+    def render(self, messages):
         dicts = to_chat_dicts(messages)
-        head = f"TOOLS={','.join(t['function']['name'] for t in tools or [])}\n"
-        return [ord(c) for c in head + "\n".join(f"<{d['role']}>{d['content']}" for d in dicts)]
+        return [ord(c) for c in "\n".join(f"<{d['role']}>{d['content']}" for d in dicts)]
 
     @staticmethod
     def _wrong(prompt):
@@ -47,9 +44,6 @@ class FakeMathModel:
 
     def _answer(self, prompt):
         a, b, wrong = self._wrong(prompt)
-        if "<tool>" not in prompt and "sympy_simplify" in prompt.split("\n")[0] and "Proposed solution" not in prompt:
-            call = f'<tool_call>{{"name": "sympy_simplify", "arguments": {{"expression": "{a}+{b}"}}}}</tool_call>'
-            return f"Use a tool. {call}", wrong
         return f"The sum is \\boxed{{{a + b + (1 if wrong else 0)}}}", wrong
 
     def _stats(self, prompt, n_tokens, full):
@@ -105,9 +99,6 @@ class FakeMathModel:
     def count_tokens(self, text):
         return len(text)
 
-    def truncate(self, text, n):
-        return text[:n]
-
     def close(self):
         self.closed = True
 
@@ -124,13 +115,6 @@ class FakeDataset:
                 probs.append(Problem(f"math/{split}/x/{k}", f"What is {a}+{b}?", f"so \\boxed{{{a + b}}}", split))
             out[split] = probs
         return out
-
-
-@pytest.fixture(scope="module")
-def runner_proc():
-    r = IsolatedRunner()
-    yield r
-    r.close()
 
 
 def _config(config, tmp_path, backend="transformers", scoring="same", concurrent=1):
@@ -170,10 +154,10 @@ def fake_capabilities(monkeypatch):
     monkeypatch.setattr("spuma.models.validation.backend_class", lambda kind: cls)
 
 
-def test_full_pipeline(config, set_settings, tmp_path, runner_proc, fake_capabilities):
+def test_full_pipeline(config, set_settings, tmp_path, fake_capabilities):
     cfg = set_settings(_config(config, tmp_path))
     engines = Engines()
-    runner = ExperimentRunner(FakeDataset(), engines.factory, default_providers(runner_proc), release=engines.release)
+    runner = ExperimentRunner(FakeDataset(), engines.factory, release=engines.release)
     runner.run()
     store = runner.store
     assert [e[:2] for e in engines.events] == [("load", "transformers")]  # one engine shared by both agents
@@ -191,20 +175,17 @@ def test_full_pipeline(config, set_settings, tmp_path, runner_proc, fake_capabil
     d = runner.scored_dir()
     feats = store.read_json(f"{d}/features.json")
     assert len(feats) == 100 and list(feats[0]["features"]) == cfg.features.order
-    assert feats[0]["tool_metadata"]["solver"]["tool_calls"] == 1
-    assert feats[0]["tool_metadata"]["reviewer"]["tool_calls"] == 0
 
-    # trajectories: the tool observation is context for step 1, and SE sampled from that exact context
+    # trajectories: one step per agent, SE sampled from that step's exact context
     pid = feats[0]["problem_id"].replace("/", "__")
     rec = store.read_json(f"{d}/steps/{pid}.json")
     solver = rec["trajectory"]["agents"][0]
-    assert solver["steps"][0]["tool_records"][0]["status"] == "success"
-    assert solver["steps"][1]["input_messages"][-1]["role"] == "tool"
-    assert set(solver["steps"][1]["metrics"]) == {"pe", "se", "nll", "length"}
-    assert len(solver["steps"][1]["uq_details"]["se_samples"]["texts"]) == 10
-    assert 0 <= solver["steps"][1]["uq_details"]["se"]["semantic_negentropy"] <= 1
-    assert solver["steps"][1]["scored_by"] == model.scorer_id
-    assert solver["steps"][1]["metrics"]["length"] == len(solver["steps"][1]["token_ids"])
+    assert len(solver["steps"]) == 1 and solver["steps"][0]["input_messages"][-1]["role"] == "user"
+    assert set(solver["steps"][0]["metrics"]) == {"pe", "se", "nll", "length"}
+    assert len(solver["steps"][0]["uq_details"]["se_samples"]["texts"]) == 10
+    assert 0 <= solver["steps"][0]["uq_details"]["se"]["semantic_negentropy"] <= 1
+    assert solver["steps"][0]["scored_by"] == model.scorer_id
+    assert solver["steps"][0]["metrics"]["length"] == len(solver["steps"][0]["token_ids"])
     assert rec["grade"]["label"] in (0, 1)
 
     ev = store.read_json(f"{d}/evaluation.json")
@@ -215,26 +196,23 @@ def test_full_pipeline(config, set_settings, tmp_path, runner_proc, fake_capabil
     assert status["status"] == "trained" and status["train_rows"] == 60
 
     meta = json.loads(next(store.path("runs").iterdir()).read_text())
-    assert (
-        meta["semantic_entropy_policy"]["n"] == 10
-        and meta["semantic_entropy_policy"]["tool_call_policy"] == "no_execution"
-    )
+    assert meta["semantic_entropy_policy"]["n"] == 10
     assert store.read_json("config.json")["model"]["name"] == "Qwen/Qwen3-8B"
 
     assert meta["backends"]["plan"]["default"]["generation_backend"] == "transformers"
 
     # resume: nothing is regenerated or rescored
     calls = model.calls
-    ExperimentRunner(FakeDataset(), engines.factory, default_providers(runner_proc), release=engines.release).run()
+    ExperimentRunner(FakeDataset(), engines.factory, release=engines.release).run()
     assert model.calls == calls and model.score_calls == 0
 
 
 @pytest.mark.parametrize(("backend", "scoring"), [("vllm", "same"), ("vllm", "transformers")])
-def test_backend_modes(config, set_settings, tmp_path, runner_proc, fake_capabilities, backend, scoring):
+def test_backend_modes(config, set_settings, tmp_path, fake_capabilities, backend, scoring):
     """vLLM-only and hybrid (vLLM generation, Transformers scoring) produce the same downstream pipeline."""
     set_settings(_config(config, tmp_path, backend, scoring))
     engines = Engines()
-    runner = ExperimentRunner(FakeDataset(), engines.factory, default_providers(runner_proc), release=engines.release)
+    runner = ExperimentRunner(FakeDataset(), engines.factory, release=engines.release)
     runner.run()
     gen = next(e for e in engines.all if e.name == "vllm")
     summary = runner.store.read_json("summary.json")
@@ -264,15 +242,13 @@ def test_backend_modes(config, set_settings, tmp_path, runner_proc, fake_capabil
     )
 
 
-def test_concurrent_problems_give_identical_results(config, set_settings, tmp_path, runner_proc, fake_capabilities):
+def test_concurrent_problems_give_identical_results(config, set_settings, tmp_path, fake_capabilities):
     """8 problems in flight (batched model calls) produce exactly the features of the one-at-a-time run."""
     outputs = {}
     for concurrent in (1, 8):
         set_settings(_config(config, tmp_path / f"c{concurrent}", concurrent=concurrent))
         engines = Engines()
-        runner = ExperimentRunner(
-            FakeDataset(), engines.factory, default_providers(runner_proc), release=engines.release
-        )
+        runner = ExperimentRunner(FakeDataset(), engines.factory, release=engines.release)
         runner.run(phases=["generate", "score"])
         rows = runner.store.read_json(f"{runner.scored_dir()}/features.json")
         outputs[concurrent] = {r["problem_id"]: (r["features"], r["label"]) for r in rows}

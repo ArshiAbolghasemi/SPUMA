@@ -18,7 +18,6 @@ def execution_plan() -> dict[str, dict[str, Any]]:
     """Per model in use: generation backend, scoring backend, and the capabilities each must have."""
     config = get_settings()
     uq = config.uncertainty
-    tools_on = config.tools.enabled and any(t.enabled for t in config.tools.registry.values())
     plan: dict[str, dict[str, Any]] = {}
     for agent in config.agents.enabled:
         key = agent.model
@@ -37,8 +36,6 @@ def execution_plan() -> dict[str, dict[str, Any]]:
         )
         entry["agents"].append(agent.id)
         gen, score = entry["generation_requires"], entry["scoring_requires"]
-        if tools_on and agent.allowed_tools:
-            gen.add("tool_calling")
         if uq.semantic_entropy.enabled:
             gen |= {"multiple_completions", "batch_generation"}
         if uq.predictive_entropy.enabled or uq.nll.enabled:

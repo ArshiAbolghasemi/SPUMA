@@ -1,21 +1,22 @@
-from langchain_core.messages import AIMessage, ToolMessage
+import pytest
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from spuma.models.chat import RAW_TEXT_KEY, ChatFormatter, parse_qwen_output, to_chat_dicts
-
-
-def test_parse_tool_calls_and_reasoning():
-    text = '<think>hmm</think>Let me solve.\n<tool_call>\n{"name": "sympy_solve", "arguments": {"equations": ["x-1"]}}\n</tool_call>'
-    p = parse_qwen_output(text)
-    assert p.reasoning == "hmm" and p.content == "Let me solve."
-    assert p.tool_calls == [{"name": "sympy_solve", "args": {"equations": ["x-1"]}, "id": "call_0"}]
-    bad = parse_qwen_output("<tool_call>{not json}</tool_call>")
-    assert not bad.tool_calls and "malformed" in bad.invalid_tool_calls[0]["error"]
+from spuma.models.chat import ChatFormatter, parse_qwen_output, to_chat_dicts
 
 
-def test_to_chat_dicts_replays_raw_text():
-    raw = 'x <tool_call>{"name": "a", "arguments": {}}</tool_call>'
-    msgs = [AIMessage("x", additional_kwargs={RAW_TEXT_KEY: raw}), ToolMessage("4", tool_call_id="call_0")]
-    assert to_chat_dicts(msgs) == [{"role": "assistant", "content": raw}, {"role": "tool", "content": "4"}]
+def test_parse_reasoning_and_content():
+    p = parse_qwen_output("<think>hmm</think>Let me solve.\n\\boxed{1}\n")
+    assert p.reasoning == "hmm" and p.content == "Let me solve.\n\\boxed{1}"
+    assert parse_qwen_output("no thinking").reasoning == ""
+
+
+def test_to_chat_dicts_system_and_user_only():
+    assert to_chat_dicts([SystemMessage("s"), HumanMessage("u")]) == [
+        {"role": "system", "content": "s"},
+        {"role": "user", "content": "u"},
+    ]
+    with pytest.raises(TypeError):
+        to_chat_dicts([AIMessage("a")])
 
 
 def test_formatter_roundtrip(tokenizer):

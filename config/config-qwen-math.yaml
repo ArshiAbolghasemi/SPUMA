@@ -55,14 +55,9 @@ agents:
       role: solver
       enabled: true
       system_prompt: >-
-        Solve mathematical problems step by step. Use available tools when helpful.
+        Solve mathematical problems step by step.
         Put the final answer in \boxed{}.
       user_template: "Problem:\n{problem}"
-      allowed_tools:
-        - sympy_solve
-        - sympy_simplify
-        - sympy_integrate
-        - sympy_differentiate
 
     - id: reviewer
       model: default
@@ -72,50 +67,6 @@ agents:
         Review mathematical reasoning, verify calculations, correct mistakes, and produce the final answer.
         Put the final answer in \boxed{}.
       user_template: "Problem:\n{problem}\n\nProposed solution:\n{previous}\n\nReview it and give the final answer."
-      allowed_tools:
-        - sympy_solve
-        - sympy_simplify
-        - math_verify
-
-orchestration:
-  framework: langgraph
-  max_steps_per_agent: 8
-  max_tool_calls_per_agent: 5
-
-tools:
-  enabled: true
-
-  registry:
-    sympy_solve:
-      enabled: true
-      provider: sympy
-      timeout_seconds: 10
-
-    sympy_simplify:
-      enabled: true
-      provider: sympy
-      timeout_seconds: 10
-
-    sympy_integrate:
-      enabled: true
-      provider: sympy
-      timeout_seconds: 10
-
-    sympy_differentiate:
-      enabled: true
-      provider: sympy
-      timeout_seconds: 10
-
-    math_verify:
-      enabled: true
-      provider: math_verify
-      timeout_seconds: 10
-
-  execution:
-    log_calls: true
-    save_results: true
-    max_output_tokens: 1024
-    on_error: return_error
 
 dataset:
   name: math
@@ -141,10 +92,9 @@ uncertainty:
     top_p: 0.9
     top_k: null
     max_new_tokens: null     # null: the agent's max_new_tokens
-    tool_call_policy: no_execution
     # clustering (UQLM): the step's text + its n samples, NLI entailment in either direction
     # equivalence of two texts: answer_aware = both box an answer -> math-verify; exactly one -> different;
-    # neither (tool calls, unfinished reasoning) -> NLI.  nli = NLI for every pair.
+    # neither (unfinished reasoning, no boxed answer) -> NLI.  nli = NLI for every pair.
     equivalence: answer_aware
     nli_model_name: tasksource/ModernBERT-large-nli  # any 3-way NLI model; labels are mapped by name
     nli_max_length: 8000     # characters per text; UQLM truncates longer ones
