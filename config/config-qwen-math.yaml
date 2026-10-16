@@ -14,7 +14,7 @@ experiment:
   concurrent_problems: 8
 
 model:
-  name: Qwen/Qwen3-8B
+  name: Qwen/Qwen2.5-7B-Instruct
   revision: null             # pin a Hub commit for reproducibility
   tokenizer_revision: null   # null: same as revision
   # Generation backend (agent steps + semantic-entropy sampling): transformers | vllm

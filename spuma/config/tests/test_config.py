@@ -13,7 +13,7 @@ from spuma.experiments.registry import EXPERIMENTS
 
 def test_project_config_is_valid(config):
     assert [a.id for a in config.agents.enabled] == ["solver", "reviewer"]
-    assert config.model.name == "Qwen/Qwen3-8B"
+    assert config.model.name == "Qwen/Qwen2.5-7B-Instruct"
     assert config.uncertainty.semantic_entropy.n == 10
     assert config.uncertainty.semantic_entropy.top_k is None
     assert len(config.features.order) == 8

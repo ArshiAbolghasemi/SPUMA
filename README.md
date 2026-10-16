@@ -25,7 +25,7 @@ Each experiment is a module in `spuma/experiments/` that names its settings file
 
 | experiment | module | settings | dataset | splits (train / validation / test) | what it runs |
 |---|---|---|---|---|---|
-| [math](docs/experiment/math_ma_qwen3_8b/report.md) | `spuma/experiments/math.py` | `config/config-qwen-math.yaml` | [MATH](https://huggingface.co/datasets/EleutherAI/hendrycks_math) (Hendrycks et al., 2021) | 800 / 200 from official train, 500 from official test | Qwen3-8B Solver -> Reviewer |
+| [math](docs/experiment/math_ma_qwen3_8b/report.md) | `spuma/experiments/math.py` | `config/config-qwen-math.yaml` | [MATH](https://huggingface.co/datasets/EleutherAI/hendrycks_math) (Hendrycks et al., 2021) | 800 / 200 from official train, 500 from official test | Qwen2.5-7B-Instruct Solver -> Reviewer |
 
 A settings file defines everything about its experiment: dataset and splits, model and backends
 (`model.backend` for generation, `model.scoring_backend` for teacher-forced scoring), agents and their
@@ -75,7 +75,7 @@ artifacts/<experiment.name>/
 Logs go to `logs/` (JSON lines) and the console.
 
 With vLLM generation and Transformers scoring, the runner releases the vLLM engine before scoring, so only
-one Qwen3-8B engine is on the GPU at a time. If GPU memory is not fully freed on a single 24 GB GPU, run
+one Qwen2.5-7B-Instruct engine is on the GPU at a time. If GPU memory is not fully freed on a single 24 GB GPU, run
 the two as separate invocations: `--phase generate`, then `--phase score --phase train --phase evaluate`.
 
 ### Backend benchmark

@@ -21,7 +21,7 @@ def test_cli_help():
 
 @pytest.mark.gpu
 def test_real_qwen3_math_smoke(config, set_settings, tmp_path):
-    """Phase 11: a real Qwen3-8B run on one MATH problem (downloads the model and dataset)."""
+    """Phase 11: a real Qwen2.5-7B-Instruct run on one MATH problem (downloads the model and dataset)."""
 
     raw = config.to_dict()
     raw["experiment"]["output_dir"] = str(tmp_path)

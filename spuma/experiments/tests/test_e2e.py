@@ -197,7 +197,7 @@ def test_full_pipeline(config, set_settings, tmp_path, fake_capabilities):
 
     meta = json.loads(next(store.path("runs").iterdir()).read_text())
     assert meta["semantic_entropy_policy"]["n"] == 10
-    assert store.read_json("config.json")["model"]["name"] == "Qwen/Qwen3-8B"
+    assert store.read_json("config.json")["model"]["name"] == "Qwen/Qwen2.5-7B-Instruct"
 
     assert meta["backends"]["plan"]["default"]["generation_backend"] == "transformers"
 

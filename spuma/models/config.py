@@ -68,7 +68,7 @@ class VLLMBackendConfig:
 class ModelConfig:
     """`model:` section (and each entry of `models:`)."""
 
-    name: str = "Qwen/Qwen3-8B"
+    name: str = "Qwen/Qwen2.5-7B-Instruct"
     revision: str | None = None
     tokenizer_revision: str | None = None  # None: same as `revision`
     backend: str = "transformers"  # generation (agents + semantic-entropy sampling)
