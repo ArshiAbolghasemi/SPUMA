@@ -33,7 +33,7 @@ class SemanticEntropyConfig:
     backend: str = "uqlm"
     n: int = 10
     temperature: float = 0.7
-    top_p: float = 0.9
+    top_p: float = 1.0
     top_k: None = None  # top-k truncation is always disabled for semantic sampling
     max_new_tokens: int | None = None  # None: the agent's max_new_tokens
     # when two of a step's texts are "the same": answer_aware = equivalent \boxed{} answers (math-verify) when

@@ -28,7 +28,7 @@ model:
   enable_thinking: false
   generation:
     temperature: 0.7
-    top_p: 0.9
+    top_p: 1.0
     top_k: null              # null = disabled (translated to each backend's own "off" value)
     max_new_tokens: 2048
 
@@ -89,7 +89,7 @@ uncertainty:
     # sampling (done by the generation backend from each step's frozen context)
     n: 10
     temperature: 0.7
-    top_p: 0.9
+    top_p: 1.0
     top_k: null
     max_new_tokens: null     # null: the agent's max_new_tokens
     # clustering (UQLM): the step's text + its n samples, NLI entailment in either direction

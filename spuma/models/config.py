@@ -15,7 +15,7 @@ class GenerationConfig:
     """Sampling settings of a model call (`model.generation:`, or an agent's own `generation:`)."""
 
     temperature: float = 0.7
-    top_p: float = 0.9
+    top_p: float = 1.0
     top_k: int | None = None  # None/0 = disabled (no top-k truncation)
     max_new_tokens: int = 2048
 
