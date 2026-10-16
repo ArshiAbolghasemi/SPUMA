@@ -6,8 +6,8 @@ network (SPN) learns the relationship between uncertainty features and final-ans
 correctness. It scores completed trajectories; it does not revise the agents' answers.
 
 The registered experiment is `math`, defined in
-[`spuma/experiments/math.py`](../../spuma/experiments/math.py), with settings in
-[`config/config-qwen-math.yaml`](../../config/config-qwen-math.yaml).
+[`spuma/experiments/math.py`](../../../spuma/experiments/math.py), with settings in
+[`config/config-qwen-math.yaml`](../../../config/config-qwen-math.yaml).
 Its artifact directory is `artifacts/ma_qwen_math/`.
 
 ## Dataset and splits
@@ -112,7 +112,7 @@ and test data are excluded from fitting.
 ## Running
 
 Run commands from the repository root after completing the setup in the
-[README](../../README.md#setup). Full generation requires Linux and an NVIDIA GPU
+[README](../../../README.md#setup). Full generation requires Linux and an NVIDIA GPU
 with vLLM installed. CPU and Apple Silicon support development and offline tests.
 
 In `config/config-qwen-math.yaml`, set `evaluation.risk_models` to select only the
@@ -206,9 +206,9 @@ either agent's context.
 
 ### Figure 2: Semantic entropy by generation step
 
-![Semantic entropy cumulative distributions for steps 1 through 8](assets/math_ma_qwen3_8b/steps_se.svg)
+![Semantic entropy cumulative distributions for steps 1 through 8](assets/steps_se.svg)
 
-[PDF version](assets/math_ma_qwen3_8b/steps_se.pdf)
+[PDF version](assets/steps_se.pdf)
 
 Each panel represents one generation position, from step 1 to step 8. Its horizontal
 axis is SE and its vertical axis is the cumulative fraction within that agent and
@@ -224,9 +224,9 @@ reduce uncertainty on the same problems. Zero SE can also occur for incorrect an
 
 ### Figure 3: Predictive entropy by generation step
 
-![Predictive entropy cumulative distributions for steps 1 through 8](assets/math_ma_qwen3_8b/steps_pe.svg)
+![Predictive entropy cumulative distributions for steps 1 through 8](assets/steps_pe.svg)
 
-[PDF version](assets/math_ma_qwen3_8b/steps_pe.pdf)
+[PDF version](assets/steps_pe.pdf)
 
 Panels again correspond to generation positions. The horizontal axis is mean
 full-vocabulary next-token entropy along the actual continuation; the vertical axis
@@ -240,9 +240,9 @@ so the panels do not track a fixed cohort improving over time.
 
 ### Figure 4: Token NLL by generation step
 
-![Token negative log-likelihood cumulative distributions for steps 1 through 8](assets/math_ma_qwen3_8b/steps_nll.svg)
+![Token negative log-likelihood cumulative distributions for steps 1 through 8](assets/steps_nll.svg)
 
-[PDF version](assets/math_ma_qwen3_8b/steps_nll.pdf)
+[PDF version](assets/steps_nll.pdf)
 
 The horizontal axis is the average negative log probability of the actual generated
 tokens, and the vertical axis is the cumulative fraction. Larger values mean that
@@ -255,9 +255,9 @@ absent curve means no observations.
 
 ### Figure 5: All observed steps pooled
 
-![Within-role histograms of semantic entropy, predictive entropy, and token NLL](assets/math_ma_qwen3_8b/pooled_steps.svg)
+![Within-role histograms of semantic entropy, predictive entropy, and token NLL](assets/pooled_steps.svg)
 
-[PDF version](assets/math_ma_qwen3_8b/pooled_steps.pdf)
+[PDF version](assets/pooled_steps.pdf)
 
 The three panels show SE, PE, and token NLL after pooling every observed test step
 within each role. The horizontal axes contain score intervals; the vertical axis
@@ -272,9 +272,9 @@ metric; numerical magnitudes across different metrics have different meanings.
 
 ### Figure 6: Final steps versus all-step RMS
 
-![Final-step and all-step RMS cumulative distributions for both agents](assets/math_ma_qwen3_8b/completed_trajectories.svg)
+![Final-step and all-step RMS cumulative distributions for both agents](assets/completed_trajectories.svg)
 
-[PDF version](assets/math_ma_qwen3_8b/completed_trajectories.pdf)
+[PDF version](assets/completed_trajectories.pdf)
 
 Columns show SE, PE, and token NLL. The top row uses each agent's last generated
 step; the bottom row uses RMS across all of its steps. Both rows give each test
@@ -292,9 +292,9 @@ stopped by a budget limit, rather than a completed answer.
 
 ### Figure 7: Uncertainty by final-answer correctness
 
-![RMS uncertainty cumulative distributions grouped by final-answer correctness](assets/math_ma_qwen3_8b/outcomes.svg)
+![RMS uncertainty cumulative distributions grouped by final-answer correctness](assets/outcomes.svg)
 
-[PDF version](assets/math_ma_qwen3_8b/outcomes.pdf)
+[PDF version](assets/outcomes.pdf)
 
 Rows show Solver and Reviewer; columns show SE, PE, and token NLL. Green solid
 curves represent correct final Reviewer answers and red dashed curves represent
