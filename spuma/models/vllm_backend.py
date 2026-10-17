@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import gc
 import logging
+import threading
 import time
 from collections.abc import Iterator, Sequence
 from importlib import metadata
@@ -105,6 +106,9 @@ class VLLMBackend:
         engine_vocab_size: int | None = None,
     ) -> None:
         self.llm = llm
+        # The offline `LLM` is not thread-safe: concurrent calls (e.g. a worker thread scoring while the batcher
+        # generates) get each other's outputs.
+        self._llm_lock = threading.Lock()
         self.config = config
         self.chat = ChatFormatter(tokenizer, config.enable_thinking)
         self.SamplingParams = sampling_params_cls
@@ -197,7 +201,8 @@ class VLLMBackend:
         start = time.perf_counter()
         prompts = [self.TokensPrompt(prompt_token_ids=list(r.prompt_ids)) for r in requests]
         params = [self.sampling_params(r.params, r.n, r.seed, r.logprobs) for r in requests]
-        outputs = self.llm.generate(prompts, params, use_tqdm=False)
+        with self._llm_lock:
+            outputs = self.llm.generate(prompts, params, use_tqdm=False)
         latency = (time.perf_counter() - start) / sum(r.n for r in requests)
         results = []
         for request, output in zip(requests, outputs, strict=True):
@@ -252,9 +257,10 @@ class VLLMBackend:
             flat_logprobs=True,
             detokenize=False,
         )
-        (output,) = self.llm.generate(
-            [self.TokensPrompt(prompt_token_ids=prompt_ids + token_ids)], params, use_tqdm=False
-        )
+        with self._llm_lock:
+            (output,) = self.llm.generate(
+                [self.TokensPrompt(prompt_token_ids=prompt_ids + token_ids)], params, use_tqdm=False
+            )
         positions = list(_positions(output.prompt_logprobs))
         if len(positions) != total:
             raise BackendCapabilityError(f"vLLM returned {len(positions)} prompt log-prob rows for {total} tokens")

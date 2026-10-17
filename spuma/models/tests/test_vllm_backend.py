@@ -1,6 +1,8 @@
 """vLLM backend logic against the fake `vllm` module (real raw log-probs from a tiny HF model)."""
 
 import dataclasses
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pytest
@@ -100,6 +102,28 @@ def test_teacher_forced_score_alignment(vllm_backend, tiny_backend):
     assert nll_only.token_entropies is None and nll_only.token_logprobs == pytest.approx(t.token_logprobs, abs=1e-5)
     _, sp = vllm_backend.llm.requests[-1]
     assert sp.max_tokens == 1 and sp.prompt_logprobs == 1
+
+
+def test_engine_calls_from_several_threads_are_serialized(vllm_backend, monkeypatch):
+    """vLLM's offline LLM mixes up the outputs of concurrent calls, e.g. a worker scoring while the batcher generates."""
+    generate, active, overlaps = vllm_backend.llm.generate, [], []
+
+    def exclusive(*args, **kwargs):
+        overlaps.append(bool(active))
+        active.append(1)
+        time.sleep(0.01)
+        try:
+            return generate(*args, **kwargs)
+        finally:
+            active.pop()
+
+    monkeypatch.setattr(vllm_backend.llm, "generate", exclusive)
+    prompt = _prompt(vllm_backend)
+    with ThreadPoolExecutor(8) as pool:
+        futures = [pool.submit(vllm_backend.score, prompt, prompt[2:9], False) for _ in range(4)]
+        futures += [pool.submit(vllm_backend.generate, GenerationRequest(prompt, GREEDY, seed=0)) for _ in range(4)]
+        [f.result() for f in futures]
+    assert len(overlaps) == 8 and not any(overlaps)
 
 
 def test_score_respects_max_model_len(vllm_backend):
