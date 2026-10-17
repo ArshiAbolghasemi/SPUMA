@@ -98,7 +98,13 @@ if [[ -n "$index" ]]; then
     uv export --frozen --no-hashes --no-emit-project --format requirements-txt "${export_args[@]}" -o "$pins" >/dev/null
     echo "using PyPI index $index; installing ${torch:-the $extra extra}"
     uv venv --allow-existing
-    uv pip install --index-url "$index" -r "$pins" -e . $torch
+    # A cold Artifactory cache can 404 a wheel it hasn't finished fetching upstream; uv doesn't retry 404s, so we do.
+    for attempt in 1 2 3; do
+        uv pip install --index-url "$index" -r "$pins" -e . $torch && break
+        (( attempt < 3 )) || exit 1
+        echo "install failed (attempt $attempt/3); retrying in 30s, the mirror may still be caching a wheel" >&2
+        sleep 30
+    done
     [[ "$extra" != vllm ]] || vllm_cuda_fix
     [[ -f .env ]] || echo "note: cp .env.example .env and set HF_TOKEN"
     exit
