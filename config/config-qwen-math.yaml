@@ -39,6 +39,12 @@ model:
     max_logprobs: -1
     enforce_eager: false
 
+  # Backend calls failing with a runtime error (CUDA OOM, engine errors), e.g. SPUMA_MODEL__RETRY__ATTEMPTS=5.
+  retry:
+    attempts: 3
+    wait_s: 1.0
+    max_wait_s: 30.0
+
 models: {}
 
 agents:

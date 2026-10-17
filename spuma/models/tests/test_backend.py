@@ -10,9 +10,10 @@ from spuma.models.backend import (
     BackendCapabilityError,
     generation_logprob_mode,
     require,
+    retry_backend_call,
     scorer_id,
 )
-from spuma.models.config import ModelConfig, VLLMBackendConfig
+from spuma.models.config import ModelConfig, RetryConfig, VLLMBackendConfig
 from spuma.models.engines import get_backend, release_backends
 from spuma.models.validation import execution_plan, validate_backends
 
@@ -60,6 +61,41 @@ def test_require_and_missing():
         require(backend, "teacher_forced_scoring")
     with pytest.raises(ValueError):
         caps.missing("teleport")
+
+
+class _Flaky:
+    """A backend whose `call` raises the given errors in turn, then returns "ok"."""
+
+    config = ModelConfig(retry=RetryConfig(attempts=3, wait_s=0.0))
+
+    def __init__(self, *errors):
+        self.errors, self.calls = list(errors), 0
+
+    @retry_backend_call
+    def call(self):
+        self.calls += 1
+        if self.errors:
+            raise self.errors.pop(0)
+        return "ok"
+
+
+@pytest.mark.parametrize(
+    ("error", "calls"), [(RuntimeError("CUDA out of memory"), 3), (BackendCapabilityError("no"), 1), (ValueError(), 1)]
+)
+def test_retry_backend_call_retries_only_runtime_failures(error, calls):
+    backend = _Flaky(*[error] * 3)
+    with pytest.raises(type(error)):
+        backend.call()
+    assert backend.calls == calls
+
+
+def test_retry_backend_call_returns_after_a_transient_failure():
+    backend = _Flaky(RuntimeError("CUDA out of memory"))
+    assert backend.call() == "ok" and backend.calls == 2
+
+
+def test_retry_settings_do_not_change_generation_fingerprint():
+    assert ModelConfig(retry=RetryConfig(attempts=5)).generation_fingerprint() == ModelConfig().generation_fingerprint()
 
 
 def test_fingerprints_separate_engines_and_generation():

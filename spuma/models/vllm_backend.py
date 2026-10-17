@@ -44,6 +44,7 @@ from spuma.models.backend import (
     LogprobMode,
     ParsedOutput,
     TokenScores,
+    retry_backend_call,
     scorer_id,
 )
 from spuma.models.chat import ChatFormatter
@@ -189,6 +190,7 @@ class VLLMBackend:
     def generate(self, request: GenerationRequest) -> list[GenerationResult]:
         return self.generate_batch([request])[0]
 
+    @retry_backend_call
     def generate_batch(self, requests: Sequence[GenerationRequest]) -> list[list[GenerationResult]]:
         if not requests:
             return []
@@ -228,6 +230,7 @@ class VLLMBackend:
             latency_s=latency,
         )
 
+    @retry_backend_call
     def score(self, prompt_ids: list[int], token_ids: list[int], full_vocabulary: bool) -> TokenScores:
         start = time.perf_counter()
         if not token_ids:

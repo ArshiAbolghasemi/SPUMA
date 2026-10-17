@@ -31,6 +31,7 @@ from spuma.models.backend import (
     GenerationResult,
     ParsedOutput,
     TokenScores,
+    retry_backend_call,
     scorer_id,
 )
 from spuma.models.chat import ChatFormatter
@@ -124,6 +125,7 @@ class TransformersBackend:
     def render(self, messages: Sequence[BaseMessage]) -> list[int]:
         return self.chat.render(messages)
 
+    @retry_backend_call
     @torch.inference_mode()
     def generate(self, request: GenerationRequest) -> list[GenerationResult]:
         params, n = request.params, request.n
@@ -152,7 +154,7 @@ class TransformersBackend:
             ids, finished = self._trim(row)
             lps = ents = None
             if request.logprobs != "none":
-                scores = self.score(request.prompt_ids, ids, full_vocabulary=request.logprobs == "full")
+                scores = self._score(request.prompt_ids, ids, full_vocabulary=request.logprobs == "full")
                 lps, ents = scores.token_logprobs, scores.token_entropies
             results.append(
                 GenerationResult(
@@ -185,8 +187,12 @@ class TransformersBackend:
                 return row[:i], True
         return row, False
 
-    @torch.inference_mode()
+    @retry_backend_call
     def score(self, prompt_ids: list[int], token_ids: list[int], full_vocabulary: bool) -> TokenScores:
+        return self._score(prompt_ids, token_ids, full_vocabulary)
+
+    @torch.inference_mode()
+    def _score(self, prompt_ids: list[int], token_ids: list[int], full_vocabulary: bool) -> TokenScores:
         start = time.perf_counter()
         if not token_ids:
             return TokenScores([], [] if full_vocabulary else None, self.scorer_id)

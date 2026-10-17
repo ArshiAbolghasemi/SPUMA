@@ -5,12 +5,21 @@ backend implementations. One engine is created per (backend kind, model fingerpr
 every agent that uses it.
 """
 
+import functools
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, fields
-from typing import Any, Literal, Protocol, runtime_checkable
+from typing import Any, Concatenate, Literal, Protocol, runtime_checkable
 
 from langchain_core.messages import BaseMessage
+from tenacity import (
+    Retrying,
+    before_sleep_log,
+    retry_if_exception_type,
+    retry_if_not_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from spuma.config import get_settings
 from spuma.models.config import BackendKind, GenerationConfig, ModelConfig
@@ -22,6 +31,25 @@ LogprobMode = Literal["none", "token", "full"]
 
 class BackendCapabilityError(RuntimeError):
     """A required capability is unavailable: raised instead of returning approximate scores."""
+
+
+def retry_backend_call[S, **P, R](method: Callable[Concatenate[S, P], R]) -> Callable[Concatenate[S, P], R]:
+    """Retry a backend method on runtime failures (CUDA OOM, engine errors) as its model's `retry:` section says;
+    capability and argument errors are final."""
+
+    @functools.wraps(method)
+    def call(self: S, *args: P.args, **kwargs: P.kwargs) -> R:
+        config = self.config.retry  # type: ignore[attr-defined]
+        retrying = Retrying(
+            retry=retry_if_exception_type(RuntimeError) & retry_if_not_exception_type(BackendCapabilityError),
+            stop=stop_after_attempt(config.attempts),
+            wait=wait_exponential(multiplier=config.wait_s, max=config.max_wait_s),
+            before_sleep=before_sleep_log(logger, logging.WARNING),
+            reraise=True,
+        )
+        return retrying(method, self, *args, **kwargs)
+
+    return call
 
 
 @dataclass(frozen=True)

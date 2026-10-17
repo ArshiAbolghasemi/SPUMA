@@ -63,6 +63,21 @@ class VLLMBackendConfig:
 
 
 @dataclass(frozen=True)
+class RetryConfig:
+    """`model.retry:` section: backend calls failing with a runtime error (CUDA OOM, engine errors) are retried with
+    exponential backoff, waiting `wait_s`, 2 * `wait_s`, ... up to `max_wait_s` between `attempts` tries."""
+
+    attempts: int = 3
+    wait_s: float = 1.0
+    max_wait_s: float = 30.0
+
+    def __post_init__(self) -> None:
+        check_range("model.retry.attempts", self.attempts, ge=1)
+        check_range("model.retry.wait_s", self.wait_s, ge=0.0)
+        check_range("model.retry.max_wait_s", self.max_wait_s, ge=0.0)
+
+
+@dataclass(frozen=True)
 class ModelConfig:
     """`model:` section (and each entry of `models:`)."""
 
@@ -76,6 +91,7 @@ class ModelConfig:
     generation: GenerationConfig = field(default_factory=GenerationConfig)
     transformers: TransformersBackendConfig = field(default_factory=TransformersBackendConfig)
     vllm: VLLMBackendConfig = field(default_factory=VLLMBackendConfig)
+    retry: RetryConfig = field(default_factory=RetryConfig)
 
     def __post_init__(self) -> None:
         check_choice("model.backend", self.backend, BACKENDS)
@@ -100,6 +116,6 @@ class ModelConfig:
     def generation_fingerprint(self) -> str:
         """Everything that can change generated trajectories (and generation-time scores)."""
         unused = "vllm" if self.backend == "transformers" else "transformers"
-        data = {k: v for k, v in to_plain(self).items() if k not in ("scoring_backend", unused)}
+        data = {k: v for k, v in to_plain(self).items() if k not in ("scoring_backend", "retry", unused)}
         data["scores_at_generation"] = self.scores_at_generation
         return stable_hash(data)
