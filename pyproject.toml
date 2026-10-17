@@ -60,6 +60,9 @@ conflicts = [
 override-dependencies = [
     "transformers>=5.10.4,<5.18",
     "datasets>=5.1.0",
+    # On Python < 3.13 uqlm caps numpy<2 but vllm needs numpy>=2 (uqlm runs on numpy 2 on 3.13+), and mistral-common
+    # (via vllm) caps numpy<2.4.
+    "numpy>=2.3.0,<2.4",
 ]
 environments = [
     "sys_platform == 'linux'",

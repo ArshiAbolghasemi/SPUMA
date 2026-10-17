@@ -3,7 +3,8 @@
 #   scripts/install-dependencies.sh                 # torch only
 #   scripts/install-dependencies.sh --vllm          # vLLM backend (Linux + NVIDIA): installs the `vllm`
 #                                                   # extra, whose pinned torch replaces the cuXXX extra
-#   scripts/install-dependencies.sh --index https://mirror/simple   # everything, torch too, from a PyPI mirror
+#   scripts/install-dependencies.sh --index https://mirror/simple   # everything from a PyPI mirror; torch from its
+#                                                   # pytorch.org proxy (Artifactory layout)
 #
 # nvcc is preferred: nvidia-smi's "CUDA Version" is only the driver's upper bound. Without a toolkit that bound
 # is enough, since torch wheels bundle their own CUDA runtime.
@@ -12,26 +13,17 @@ cd "$(dirname "$0")/.."
 
 # PyPI's vllm/torch are CUDA 13 builds; on a CUDA 12.9 driver swap in the same versions' +cu129 builds.
 vllm_cuda_fix() {
-    local p v f vllm_version pkgs=() idx=() py
+    local p v vllm_version pkgs=()
     [[ "$vllm_cuda" == 12.9 ]] || return 0
-    py=$(.venv/bin/python -c 'import sys; print("cp%d%d" % sys.version_info[:2])')
     for p in vllm torch torchvision torchaudio; do
         v=$(uv pip show "$p" | sed -n 's/^Version: \([^+]*\).*/\1/p')
-        if [[ -n "$index" && "$p" != vllm ]]; then
-            # The mirror's index links straight to download-r2.pytorch.org, so point at the wheel's mirror path instead.
-            # ponytail: assumes an Artifactory mirror (.../api/pypi/<repo>/simple serving <repo>/whl/cu129)
-            f=$(curl -fsSL "${index%/simple*}/whl/cu129/$p/" | grep -o "$p-$v\(%2B\|+\)cu129-$py-$py-manylinux[^\"#]*_$(uname -m)\.whl" | head -1)
-            [[ -n "$f" ]] || { echo "no $p $v+cu129 wheel for $py on ${index%/simple*}/whl/cu129" >&2; exit 1; }
-            pkgs+=("$p @ $(sed 's|/api/pypi/|/|' <<<"${index%/simple*}")/whl/cu129/$f")
-        else
-            pkgs+=("$p==$v+cu129")
-        fi
+        pkgs+=("$p==$v+cu129")
         [[ "$p" != vllm ]] || vllm_version=$v
     done
-    if [[ -n "$index" ]]; then idx=(--index-url "$index"); else idx=(--extra-index-url https://download.pytorch.org/whl/cu129); fi
     echo "driver supports CUDA $vllm_cuda (< 13): installing ${pkgs[*]}"
     uv pip install --reinstall --no-deps --index-strategy unsafe-best-match \
-        "${idx[@]}" --extra-index-url "https://wheels.vllm.ai/$vllm_version/cu129" "${pkgs[@]}"
+        --extra-index-url "https://wheels.vllm.ai/$vllm_version/cu129" --extra-index-url https://download.pytorch.org/whl/cu129 \
+        "${pkgs[@]}"
 }
 export UV_PYTHON_PREFERENCE=only-managed
 export UV_HTTP_TIMEOUT=${UV_HTTP_TIMEOUT:-1800}
@@ -43,7 +35,7 @@ while (( $# )); do
         --vllm) vllm=1 ;;
         --index) [[ $# -ge 2 ]] || { echo "--index needs a URL" >&2; exit 2; }; index=$2; shift ;;
         --index=*) index=${1#--index=} ;;
-        -h|--help) sed -n '2,8p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,9p' "$0"; exit 0 ;;
         *) echo "unknown flag: $1" >&2; exit 2 ;;
     esac
     shift
@@ -82,30 +74,40 @@ fi
 args=(--extra "$extra")
 
 if [[ -n "$index" ]]; then
-    torch=""
+    # Which pytorch.org build to take instead of PyPI's torch ("" = PyPI's is right).
     case "$extra" in
-        vllm) export_args=(--extra vllm) ;;
-        cu128)
-            export_args=(--prune torch); torch=torch==2.10.0
-            echo "note: the driver predates CUDA 13, so using PyPI torch 2.10.0 (CUDA 12.8), not the cu128 extra's 2.11.0" >&2 ;;
-        cu126) echo "PyPI has no CUDA 12.6 torch build: update the driver to CUDA >= 12.8" >&2; exit 1 ;;
-        *)
-            export_args=(--prune torch); torch=$(sed -n "s/^$extra = \[\"\(torch==[^\"]*\)\"\]/\1/p" pyproject.toml)
-            [[ "$extra" != cpu ]] || echo "note: PyPI's Linux torch is the CUDA build; it also runs on CPU" >&2 ;;
+        vllm) tag=""; [[ "${vllm_cuda:-}" != 12.9 ]] || tag=cu129 ;;
+        mps) tag="" ;;
+        *) tag=$extra ;;
     esac
     pins=$(mktemp)
     trap 'rm -f "$pins"' EXIT
-    uv export --frozen --no-hashes --no-emit-project --format requirements-txt "${export_args[@]}" -o "$pins" >/dev/null
-    echo "using PyPI index $index; installing ${torch:-the $extra extra}"
+    uv export --frozen --no-hashes --no-emit-project --format requirements-txt "${args[@]}" -o "$pins" >/dev/null
     uv venv --allow-existing
-    # A cold Artifactory cache can 404 a wheel it hasn't finished fetching upstream; uv doesn't retry 404s, so we do.
-    for attempt in 1 2 3; do
-        uv pip install --index-url "$index" -r "$pins" -e . $torch && break
-        (( attempt < 3 )) || exit 1
-        echo "install failed (attempt $attempt/3); retrying in 30s, the mirror may still be caching a wheel" >&2
-        sleep 30
-    done
-    [[ "$extra" != vllm ]] || vllm_cuda_fix
+    torch=() vllm_index=()
+    if [[ -n "$tag" ]]; then
+        # The mirror's pytorch index links straight to download-r2.pytorch.org, so install each wheel by its mirror URL.
+        # ponytail: assumes Artifactory (.../api/pypi/<repo>/simple also serves <repo>/whl/<tag>, files at /<repo>/whl/<tag>)
+        mirror=${index%/simple*}
+        py=$(.venv/bin/python -c 'import sys; print("cp%d%d" % sys.version_info[:2])')
+        pkgs=(torch); [[ "$extra" != vllm ]] || pkgs+=(torchvision torchaudio)
+        for p in "${pkgs[@]}"; do
+            v=$(sed -n "s/^$p==\([^+ ;]*\).*/\1/p" "$pins")
+            f=$(curl -fsSL "$mirror/whl/$tag/$p/" | grep -o "$p-$v\(%2B\|+\)$tag-$py-$py-manylinux[^\"#]*_$(uname -m)\.whl" | head -1)
+            [[ -n "$f" ]] || { echo "no $p $v+$tag wheel for $py at $mirror/whl/$tag" >&2; exit 1; }
+            torch+=("$p @ ${mirror/\/api\/pypi\//\/}/whl/$tag/$f")
+        done
+        if [[ "$tag" == cu129 ]]; then
+            v=$(sed -n 's/^vllm==\([^ ;]*\).*/\1/p' "$pins")
+            torch+=("vllm==$v+cu129")
+            vllm_index=(--index-strategy unsafe-best-match --extra-index-url "https://wheels.vllm.ai/$v/cu129")
+        fi
+        # Prune torch so its CUDA libs come from the build above, not the locked PyPI build's.
+        uv export --frozen --no-hashes --no-emit-project --format requirements-txt "${args[@]}" --prune torch \
+            | grep -vE '^(torchvision|torchaudio|vllm)==' >"$pins"
+    fi
+    echo "using PyPI index $index; installing the $extra extra${tag:+ (torch: pytorch.org $tag build)}"
+    uv pip install --index-url "$index" "${vllm_index[@]}" -r "$pins" -e . "${torch[@]}"
     [[ -f .env ]] || echo "note: cp .env.example .env and set HF_TOKEN"
     exit
 fi
