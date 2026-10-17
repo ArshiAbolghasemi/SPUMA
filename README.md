@@ -3,7 +3,7 @@ Probabilistic Uncertainty Estimation in Multi-Agent LLM Systems via Sum-Product 
 
 ## Setup
 
-Requirements: [uv](https://docs.astral.sh/uv/), Python 3.14 (uv installs it), and for real runs an NVIDIA
+Requirements: [uv](https://docs.astral.sh/uv/), Python 3.12 (uv installs it), and for real runs an NVIDIA
 GPU (vLLM generation needs Linux). Apple Silicon and CPU are enough for development and tests.
 
 ```bash
