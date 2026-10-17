@@ -12,22 +12,26 @@ cd "$(dirname "$0")/.."
 
 # PyPI's vllm/torch are CUDA 13 builds; on a CUDA 12.9 driver swap in the same versions' +cu129 builds.
 vllm_cuda_fix() {
-    local cuda p v vllm_version pkgs=()
-    cuda=$(nvidia-smi 2>/dev/null | sed -n 's/.*CUDA Version: *\([0-9]*\.[0-9]*\).*/\1/p') || true
-    case "$cuda" in
-        ""|13.*|1[4-9].*) return ;;
-        12.9) ;;
-        *) echo "driver supports CUDA $cuda; vLLM needs a driver with CUDA >= 12.9" >&2; exit 1 ;;
-    esac
+    local p v f vllm_version pkgs=() idx=() py
+    [[ "$vllm_cuda" == 12.9 ]] || return 0
+    py=$(.venv/bin/python -c 'import sys; print("cp%d%d" % sys.version_info[:2])')
     for p in vllm torch torchvision torchaudio; do
         v=$(uv pip show "$p" | sed -n 's/^Version: \([^+]*\).*/\1/p')
-        pkgs+=("$p==$v+cu129")
+        if [[ -n "$index" && "$p" != vllm ]]; then
+            # The mirror's index links straight to download-r2.pytorch.org, so point at the wheel's mirror path instead.
+            # ponytail: assumes an Artifactory mirror (.../api/pypi/<repo>/simple serving <repo>/whl/cu129)
+            f=$(curl -fsSL "${index%/simple*}/whl/cu129/$p/" | grep -o "$p-$v\(%2B\|+\)cu129-$py-$py-manylinux[^\"#]*_$(uname -m)\.whl" | head -1)
+            [[ -n "$f" ]] || { echo "no $p $v+cu129 wheel for $py on ${index%/simple*}/whl/cu129" >&2; exit 1; }
+            pkgs+=("$p @ $(sed 's|/api/pypi/|/|' <<<"${index%/simple*}")/whl/cu129/$f")
+        else
+            pkgs+=("$p==$v+cu129")
+        fi
         [[ "$p" != vllm ]] || vllm_version=$v
     done
-    echo "driver supports CUDA $cuda (< 13): installing ${pkgs[*]}"
+    if [[ -n "$index" ]]; then idx=(--index-url "$index"); else idx=(--extra-index-url https://download.pytorch.org/whl/cu129); fi
+    echo "driver supports CUDA $vllm_cuda (< 13): installing ${pkgs[*]}"
     uv pip install --reinstall --no-deps --index-strategy unsafe-best-match \
-        --extra-index-url "https://wheels.vllm.ai/$vllm_version/cu129" --extra-index-url https://download.pytorch.org/whl/cu129 \
-        "${pkgs[@]}"
+        "${idx[@]}" --extra-index-url "https://wheels.vllm.ai/$vllm_version/cu129" "${pkgs[@]}"
 }
 export UV_PYTHON_PREFERENCE=only-managed
 export UV_HTTP_TIMEOUT=${UV_HTTP_TIMEOUT:-1800}
@@ -48,6 +52,11 @@ done
 if (( vllm )); then
     [[ "$(uname -s)" == "Linux" ]] || { echo "--vllm needs Linux + an NVIDIA GPU" >&2; exit 1; }
     command -v nvidia-smi >/dev/null || echo "warning: nvidia-smi not found; vLLM needs an NVIDIA GPU" >&2
+    vllm_cuda=$(nvidia-smi 2>/dev/null | sed -n 's/.*CUDA Version: *\([0-9]*\.[0-9]*\).*/\1/p') || true
+    case "$vllm_cuda" in
+        ""|12.9|13.*|1[4-9].*) ;;
+        *) echo "driver supports CUDA $vllm_cuda; vLLM needs a driver with CUDA >= 12.9" >&2; exit 1 ;;
+    esac
     extra=vllm
 elif [[ "$(uname -s)" == "Darwin" ]]; then
     extra=mps
