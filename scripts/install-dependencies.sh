@@ -102,9 +102,12 @@ if [[ -n "$index" ]]; then
             torch+=("vllm==$v+cu129")
             vllm_index=(--index-strategy unsafe-best-match --extra-index-url "https://wheels.vllm.ai/$v/cu129")
         fi
-        # Prune torch so its CUDA libs come from the build above, not the locked PyPI build's.
+        # Prune torch so its CUDA libs come from the build above, not the locked PyPI build's. vllm also pulls
+        # CUDA 13 pins (cuda-python, nvidia-cuda-runtime, ...) that clash with cu129; let the resolver pick those.
+        drop='torchvision|torchaudio|vllm'
+        [[ "$tag" != cu129 ]] || drop+='|triton|cuda-[a-z-]+|nvidia-[a-z0-9-]+'
         uv export --frozen --no-hashes --no-emit-project --format requirements-txt "${args[@]}" --prune torch \
-            | grep -vE '^(torchvision|torchaudio|vllm)==' >"$pins"
+            | grep -vE "^($drop)==" >"$pins"
     fi
     echo "using PyPI index $index; installing the $extra extra${tag:+ (torch: pytorch.org $tag build)}"
     uv pip install --index-url "$index" "${vllm_index[@]}" -r "$pins" -e . "${torch[@]}"
