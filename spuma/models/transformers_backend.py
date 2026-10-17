@@ -10,6 +10,8 @@ The vocabulary softmax is processed in chunks on the device; only per-token log-
 are moved to the CPU.
 """
 
+from __future__ import annotations
+
 import gc
 import logging
 import time

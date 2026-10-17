@@ -9,6 +9,8 @@ cached `get_settings()`. Each section validates itself in `__post_init__`; `Sett
 checks the rules that span sections (feature order, model references).
 """
 
+from __future__ import annotations
+
 import dataclasses
 import logging
 import os

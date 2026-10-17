@@ -20,6 +20,8 @@ on the GPU, so PE moves |V| (~152k for Qwen3) floats per scored position to the 
 Distributions are never truncated: a position that does not carry the whole vocabulary raises.
 """
 
+from __future__ import annotations
+
 import gc
 import logging
 import time
