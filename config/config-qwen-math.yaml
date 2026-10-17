@@ -34,7 +34,7 @@ model:
 
   vllm:
     max_model_len: 8192
-    gpu_memory_utilization: 0.75
+    gpu_memory_utilization: 0.6
     tensor_parallel_size: 1
     max_logprobs: -1
     enforce_eager: false
