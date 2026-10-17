@@ -9,6 +9,26 @@
 # is enough, since torch wheels bundle their own CUDA runtime.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+
+# PyPI's vllm/torch are CUDA 13 builds; on a CUDA 12.9 driver swap in the same versions' +cu129 builds.
+vllm_cuda_fix() {
+    local cuda p v vllm_version pkgs=()
+    cuda=$(nvidia-smi 2>/dev/null | sed -n 's/.*CUDA Version: *\([0-9]*\.[0-9]*\).*/\1/p') || true
+    case "$cuda" in
+        ""|13.*|1[4-9].*) return ;;
+        12.9) ;;
+        *) echo "driver supports CUDA $cuda; vLLM needs a driver with CUDA >= 12.9" >&2; exit 1 ;;
+    esac
+    for p in vllm torch torchvision torchaudio; do
+        v=$(uv pip show "$p" | sed -n 's/^Version: \([^+]*\).*/\1/p')
+        pkgs+=("$p==$v+cu129")
+        [[ "$p" != vllm ]] || vllm_version=$v
+    done
+    echo "driver supports CUDA $cuda (< 13): installing ${pkgs[*]}"
+    uv pip install --reinstall --no-deps --index-strategy unsafe-best-match \
+        --extra-index-url "https://wheels.vllm.ai/$vllm_version/cu129" --extra-index-url https://download.pytorch.org/whl/cu129 \
+        "${pkgs[@]}"
+}
 export UV_PYTHON_PREFERENCE=only-managed
 export UV_HTTP_TIMEOUT=${UV_HTTP_TIMEOUT:-1800}
 
@@ -70,11 +90,13 @@ if [[ -n "$index" ]]; then
     echo "using PyPI index $index; installing ${torch:-the $extra extra}"
     uv venv --allow-existing
     uv pip install --index-url "$index" -r "$pins" -e . $torch
+    [[ "$extra" != vllm ]] || vllm_cuda_fix
     [[ -f .env ]] || echo "note: cp .env.example .env and set HF_TOKEN"
     exit
 fi
 
 echo "uv sync ${args[*]}"
 uv sync "${args[@]}"
+[[ "$extra" != vllm ]] || vllm_cuda_fix
 
 [[ -f .env ]] || echo "note: cp .env.example .env and set HF_TOKEN"
