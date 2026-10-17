@@ -175,7 +175,7 @@ evaluation:
     cluster_by: problem_id
 
 logging:
-  level: INFO
+  level: DEBUG
   format: json
   console: true
   file: true
