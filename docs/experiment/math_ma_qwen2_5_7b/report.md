@@ -1,7 +1,5 @@
 # SPUMA: Qwen2.5-7B Mathematical Feedback Experiment
 
-[PDF](report.pdf) | [LaTeX](report.tex) | [Plain text](report.text) | [Workflow diagram](workflow.html)
-
 ## Introduction
 
 This experiment asks whether uncertainty measured during a two-agent mathematical conversation predicts an incorrect final answer. A Master Mathematician proposes and revises a solution; a Curious Math Enthusiast asks questions, gives feedback, and decides when the discussion is complete. Both roles use Qwen/Qwen2.5-7B-Instruct. A joint sum-product network (SPN) estimates error risk after the conversation.
@@ -34,9 +32,30 @@ The last Mathematician response is graded, not the Enthusiast response. The eval
 
 Each round has two responses. The Mathematician receives the original problem and all previous dialogue and is asked to solve accurately, explain clearly, respond to feedback, and use a boxed final answer. The Enthusiast sees the problem and latest solution, asks for clarification or points out concerns, and is instructed not to solve the problem independently. Each role sees its own previous messages as assistant messages and the other role's messages as user inputs.
 
+The following system prompts are copied from the saved run configuration; only line wrapping is added for readability.
+
+Mathematician system prompt:
+
+```text
+You are the Master Mathematician, an expert in mathematical problem-solving. Solve
+problems accurately, explain your reasoning clearly, and respond to the Curious Math
+Enthusiast's questions and feedback. Correct mistakes when necessary, maintain
+conversation context, and present final answers using \boxed{} when appropriate.
+```
+
+Enthusiast system prompt:
+
+```text
+You are the Curious Math Enthusiast, collaborating with the Master Mathematician.
+Carefully examine mathematical solutions, ask relevant questions, request clarifications,
+and provide constructive feedback. Do not solve the problem yourself. When the solution is
+sufficiently complete and convincing, end your response with TASK_DONE. Otherwise,
+continue the discussion naturally.
+```
+
 The LangGraph workflow stops when the Enthusiast response contains TASK_DONE, or after ten rounds. Uncertainty is measured after each response but does not enter the dialogue or determine stopping. The Monte Carlo alternatives do not become additional conversation turns. This feedback run has no mathematical tool-execution loop, unlike the earlier Solver-Reviewer experiment.
 
-![Feedback workflow and measurement path. Solid arrows carry the conversation and stopping decision; dashed arrows carry recorded responses to uncertainty measurement. Continued dialogue returns to the Mathematician. The final Mathematician response is graded separately against the reference. The lower path aggregates eight features and queries the joint SPN; neither reference answers nor predicted risk are supplied to the agents.](assets/workflow.png)
+![Feedback workflow and measurement path. Solid arrows carry the conversation and stopping decision; dashed arrows carry recorded responses to uncertainty measurement. Continued dialogue returns to the Mathematician. The final Mathematician response is graded separately against the reference. The lower path aggregates eight features and queries the joint SPN; neither reference answers nor predicted risk are supplied to the agents.](assets/workflow.svg)
 
 Figure 1. Feedback workflow and measurement path. Solid arrows carry the conversation and stopping decision; dashed arrows carry recorded responses to uncertainty measurement. Continued dialogue returns to the Mathematician. The final Mathematician response is graded separately against the reference. The lower path aggregates eight features and queries the joint SPN; neither reference answers nor predicted risk are supplied to the agents.
 
@@ -142,9 +161,9 @@ For example, a two-component mixture of histograms for one variable has one inpu
 
 These occurrence counts describe topology, not feature importance. Repeated leaves do not create additional observations, additional input columns, or train/test duplication. The 100 leaf modules are the sum of 75 histogram modules and 25 label modules; histogram bins and tails are parameters inside a leaf, not extra leaves.
 
-![Actual learned root factorization, with deeper subtrees collapsed for readability. F1-F8 correspond to the input table. The root product has a label-dependent sum block over F1,F2,F3,F4,F8,Y; a separate sum block over F5,F7; and a histogram factor over F6. The first block has two weighted subtrees with weights read from the checkpoint. Full node scopes, parameters, and edges are supplied in trained_spn.json and trained_spn.dot; the overview does not depict all 218 modules.](assets/trained_spn.png)
+![Actual learned root factorization, with deeper subtrees collapsed for readability. F1-F8 correspond to the input table. The root product has a label-dependent sum block over F1,F2,F3,F4,F8,Y; a separate sum block over F5,F7; and a histogram factor over F6. The first block has two weighted subtrees with weights read from the checkpoint. The overview collapses deeper branches and does not depict all 218 modules.](assets/trained_spn.svg)
 
-Figure 2. Actual learned root factorization, with deeper subtrees collapsed for readability. F1-F8 correspond to the input table. The root product has a label-dependent sum block over F1,F2,F3,F4,F8,Y; a separate sum block over F5,F7; and a histogram factor over F6. The first block has two weighted subtrees with weights read from the checkpoint. Full node scopes, parameters, and edges are supplied in trained_spn.json and trained_spn.dot; the overview does not depict all 218 modules.
+Figure 2. Actual learned root factorization, with deeper subtrees collapsed for readability. F1-F8 correspond to the input table. The root product has a label-dependent sum block over F1,F2,F3,F4,F8,Y; a separate sum block over F5,F7; and a histogram factor over F6. The first block has two weighted subtrees with weights read from the checkpoint. The overview collapses deeper branches and does not depict all 218 modules.
 
 A consequential structural result is that the Enthusiast's MCSP and NLL (F5,F7) form a factor separate from Y, and Enthusiast SE (F6) forms another separate factor. Both factors cancel in the posterior ratio P(Y=1|Z). In this fitted network, error-risk predictions therefore depend on the four Mathematician inputs plus Enthusiast mean length (F8), even though all eight features were offered to learning. This is a fitted independence assumption, not proof that the excluded signals cannot improve another model or another SPN structure.
 
@@ -173,7 +192,7 @@ The Mathematician has mean RMS SE 0.483 nats, with exactly zero SE on 56.0% of t
 
 MCSP, SE, and NLL are different quantities and their numerical magnitudes are not directly comparable. Mathematician and Enthusiast also have different tasks: answer production versus open-ended feedback. Role differences cannot be interpreted as isolated effects of reasoning quality. In particular, the Enthusiast's high SE can reflect varied questions or feedback rather than disagreement about a boxed mathematical answer.
 
-![Discriminative distributions of the individual aggregated signals. Rows are Mathematician and Enthusiast; columns are RMS MCSP, SE, and token NLL. Green solid ECDFs represent 375 correct final answers and red dashed ECDFs represent 125 incorrect answers. Each curve is normalized within its group; its height is the fraction at or below the horizontal-axis score. Rightward shifts indicate larger values, but only SE and NLL have the default higher-means-more-uncertain direction. For MCSP, lower values indicate lower confidence. Overlap means no individual signal perfectly detects errors.](assets/feature_distributions.png)
+![Discriminative distributions of the individual aggregated signals. Rows are Mathematician and Enthusiast; columns are RMS MCSP, SE, and token NLL. Green solid ECDFs represent 375 correct final answers and red dashed ECDFs represent 125 incorrect answers. Each curve is normalized within its group; its height is the fraction at or below the horizontal-axis score. Rightward shifts indicate larger values, but only SE and NLL have the default higher-means-more-uncertain direction. For MCSP, lower values indicate lower confidence. Overlap means no individual signal perfectly detects errors.](assets/feature_distributions.svg)
 
 Figure 3. Discriminative distributions of the individual aggregated signals. Rows are Mathematician and Enthusiast; columns are RMS MCSP, SE, and token NLL. Green solid ECDFs represent 375 correct final answers and red dashed ECDFs represent 125 incorrect answers. Each curve is normalized within its group; its height is the fraction at or below the horizontal-axis score. Rightward shifts indicate larger values, but only SE and NLL have the default higher-means-more-uncertain direction. For MCSP, lower values indicate lower confidence. Overlap means no individual signal perfectly detects errors.
 
@@ -188,11 +207,11 @@ Figure 3. Discriminative distributions of the individual aggregated signals. Row
 
 Single-feature AUROC uses 1-MCSP for confidence and the original SE/NLL for uncertainty. These directions follow metric definitions; they were not selected to maximize test AUROC. An AUROC below 0.5 is retained rather than flipping the score after seeing test results. The single-feature analysis is descriptive and does not measure each input's contribution to the jointly fitted SPN; that would require training ablations.
 
-![Final-response scores (top) versus all-step RMS inputs (bottom). Columns show MCSP confidence, SE in nats, and token NLL in nats/token. Blue is Mathematician; orange is Enthusiast. All curves use the same 500 test problems and are ECDFs. The bottom row contains the uncertainty/confidence inputs supplied to the SPN. The rows are very similar because 99.4% of test conversations contain only one round, for which RMS equals the single observed score.](assets/completed_trajectories.png)
+![Final-response scores (top) versus all-step RMS inputs (bottom). Columns show MCSP confidence, SE in nats, and token NLL in nats/token. Blue is Mathematician; orange is Enthusiast. All curves use the same 500 test problems and are ECDFs. The bottom row contains the uncertainty/confidence inputs supplied to the SPN. The rows are very similar because 99.4% of test conversations contain only one round, for which RMS equals the single observed score.](assets/completed_trajectories.svg)
 
 Figure 4. Final-response scores (top) versus all-step RMS inputs (bottom). Columns show MCSP confidence, SE in nats, and token NLL in nats/token. Blue is Mathematician; orange is Enthusiast. All curves use the same 500 test problems and are ECDFs. The bottom row contains the uncertainty/confidence inputs supplied to the SPN. The rows are very similar because 99.4% of test conversations contain only one round, for which RMS equals the single observed score.
 
-![Per-round response distributions. Rows show MCSP, SE, and token NLL; columns are the observed rounds 1-4. Blue is Mathematician and orange is Enthusiast. Each panel states how many test problems reached that round; round 1 has 500, round 2 has 3, and rounds 3 and 4 each have 1. Within each metric the horizontal range is shared. These later-round samples are too small and too selected to support claims that additional feedback reduces uncertainty.](assets/round_distributions.png)
+![Per-round response distributions. Rows show MCSP, SE, and token NLL; columns are the observed rounds 1-4. Blue is Mathematician and orange is Enthusiast. Each panel states how many test problems reached that round; round 1 has 500, round 2 has 3, and rounds 3 and 4 each have 1. Within each metric the horizontal range is shared. These later-round samples are too small and too selected to support claims that additional feedback reduces uncertainty.](assets/round_distributions.svg)
 
 Figure 5. Per-round response distributions. Rows show MCSP, SE, and token NLL; columns are the observed rounds 1-4. Blue is Mathematician and orange is Enthusiast. Each panel states how many test problems reached that round; round 1 has 500, round 2 has 3, and rounds 3 and 4 each have 1. Within each metric the horizontal range is shared. These later-round samples are too small and too selected to support claims that additional feedback reduces uncertainty.
 
@@ -217,7 +236,7 @@ The Mathematician SE baseline requires no error-model fitting. Its better observ
 
 Intervals use 1,000 percentile bootstrap resamples of problem identifiers with 95% confidence, as stored in evaluation.json. They describe uncertainty conditional on this run and test sample; they do not capture variation across independent model generations, training seeds, prompt choices, or datasets. No operating threshold is tuned on the test set in this report.
 
-![Joint-SPN discrimination on 500 test problems. Left: predicted-error histograms normalized separately for correct and incorrect answers; each class&#x27;s bin heights sum to one, so height does not represent its population size. Middle: ROC curve, with false-positive rate on the horizontal axis and true-positive rate on the vertical axis; the dashed diagonal is random ranking. Orange dash-dot curves show the exploratory Mathematician RMS SE baseline. Right: precision versus recall for incorrect answers, with the dashed 0.25 prevalence reference. The curve label AP denotes average precision. These are descriptive curves from the saved predictions, with no threshold selected to maximize a test-set result.](assets/discrimination.png)
+![Joint-SPN discrimination on 500 test problems. Left: predicted-error histograms normalized separately for correct and incorrect answers; each class&#x27;s bin heights sum to one, so height does not represent its population size. Middle: ROC curve, with false-positive rate on the horizontal axis and true-positive rate on the vertical axis; the dashed diagonal is random ranking. Orange dash-dot curves show the exploratory Mathematician RMS SE baseline. Right: precision versus recall for incorrect answers, with the dashed 0.25 prevalence reference. The curve label AP denotes average precision. These are descriptive curves from the saved predictions, with no threshold selected to maximize a test-set result.](assets/discrimination.svg)
 
 Figure 6. Joint-SPN discrimination on 500 test problems. Left: predicted-error histograms normalized separately for correct and incorrect answers; each class's bin heights sum to one, so height does not represent its population size. Middle: ROC curve, with false-positive rate on the horizontal axis and true-positive rate on the vertical axis; the dashed diagonal is random ranking. Orange dash-dot curves show the exploratory Mathematician RMS SE baseline. Right: precision versus recall for incorrect answers, with the dashed 0.25 prevalence reference. The curve label AP denotes average precision. These are descriptive curves from the saved predictions, with no threshold selected to maximize a test-set result.
 
@@ -235,56 +254,4 @@ The joint SPN ranks incorrect answers usefully, but ranking quality does not est
 
 Brier score averages squared probability errors. ECE summarizes the absolute difference between predicted and observed error probability over 15 equal-width bins. Binary risk NLL scores the correctness-label probability and differs from the response-token NLL used as an input feature. Lower values are better for these three measures; an ECE of 0.0779 does not justify claiming perfect calibration, and binning can hide local deviations.
 
-![Reliability and selective prediction. Left: each occupied probability bin is a point at its mean predicted risk and observed error fraction; marker area grows with bin count. The dashed diagonal denotes perfect bin-level calibration; sparse bins have noisier observed fractions. Right: answers are retained from lowest predicted risk upward. Coverage is the retained fraction and risk is their error fraction; the dashed line is full-test error prevalence. Risk-coverage uses expected ordering within tied-score groups. This plots abstention behavior without selecting a deployment threshold.](assets/calibration_coverage.png)
-
-Figure 7. Reliability and selective prediction. Left: each occupied probability bin is a point at its mean predicted risk and observed error fraction; marker area grows with bin count. The dashed diagonal denotes perfect bin-level calibration; sparse bins have noisier observed fractions. Right: answers are retained from lowest predicted risk upward. Coverage is the retained fraction and risk is their error fraction; the dashed line is full-test error prevalence. Risk-coverage uses expected ordering within tied-score groups. This plots abstention behavior without selecting a deployment threshold.
-
 The reported AURC is the mean retained-set error rate over coverage k/n, k=1,...,n. AUARC is one minus AURC under the repository's convention. These metrics describe selective ranking on existing answers, not an intervention that improves the generated mathematical solutions.
-
-## Leakage checks and validity limits
-
-The saved splits contain no overlapping identifiers or whitespace-normalized exact problem texts across training, validation, and test. The runner trains the SPN only from train rows; standardization and histogram boundaries are fitted on those rows. The workflow receives problem text and conversation, not reference solutions. SE compares generated responses with each other rather than with references. The SPN feature vector excludes labels and reference answers. These checks found no direct split or answer-label leakage in the inspected pipeline.
-
-The audit does not establish absence of near-duplicate problem variants, contamination of the language model's pretraining or instruction-tuning data, or test-guided choices made outside the saved code and artifacts. The checkpoint alone cannot establish the full history of prompt, feature, or hyperparameter selection. Bootstrap intervals do not correct such selection effects.
-
-The earlier Qwen3-8B sequential Solver-Reviewer report used different agents, prompts, scoring engines, uncertainty definitions, sampling settings, and mathematical tool access. Its reported 79.2% accuracy and 0.888 AUROC cannot serve as a controlled estimate of the feedback loop's causal effect. The current run has lower answer accuracy and higher error-ranking AUROC, but several factors changed simultaneously and error prevalence differs. The near-universal first-round termination further limits conclusions about iterative correction.
-
-Other limits include one dataset, one model identity, one saved generation run, unpinned Hub revisions, five failed training conversations, finite Monte Carlo samples, automated answer grading without independent human regrading, and role-dependent text formats. Low SE can describe confident consensus on an incorrect answer. MCSP and NLL can reflect language fluency and response style as well as mathematical correctness.
-
-## Reproducing the experiment
-
-Run from the repository root after installing the project dependencies with Linux, an NVIDIA GPU, and vLLM for the saved generation backend. The registered experiment is math and its configuration is config/config-qwen-math.yaml. To evaluate only the joint SPN, set evaluation.risk_models to [spn] in that YAML file while preserving the other settings. The shared checked-in configuration can select additional risk models; this report uses only spn.
-
-```text
-scripts/run-experiments.sh --experiment math --limit 5
-scripts/run-experiments.sh --experiment math
-
-Reuse saved responses and features:
-scripts/run-experiments.sh --experiment math \
-  --phase train --phase evaluate
-```
-
-The smoke command limits each partition to five problems and cannot reproduce full-run metrics. Full phases are generate, score, train, and evaluate; generation/scoring use the model and NLI resources, while SPN fitting and evaluation run on CPU. Resume is enabled, with fingerprinted generation and scoring directories. Archive the exact artifact snapshot and pin model/tokenizer revisions for a future reproducibility study.
-
-## Reproducibility and delivered artifacts
-
-Saved evaluation run: 20261017T190125-5cc95f. The report generator verifies feature aggregation, split disjointness, class counts, stored metrics, SPN node counts, sum-weight normalization, complete sum scopes, decomposable product scopes, and checkpoint predictions against all 500 saved test predictions. It does not regenerate answers or refit the SPN.
-
-```text
-Source directory:
-artifacts/ma_qwen_math/
-  generation-73c7092a6566/scored-fbc4ac53ebbc/
-```
-
-```text
-Rebuild the report sources and scientific figures:
-uv run --no-sync python \
-  docs/experiment/math_ma_qwen2_5_7b/generate_report.py
-
-Compile the generated LaTeX with a TeX installation:
-cd docs/experiment/math_ma_qwen2_5_7b
-tectonic report.tex
-```
-
-Deliverables are report.tex (LaTeX source), report.pdf (compiled report), report.md (Markdown with figures), report.text and report.txt (plain text including equations, tables, and figure explanations), trained_spn.json (full learned topology and parameters), and trained_spn.dot (Graphviz topology). Figures are supplied as PNG for Markdown, vector PDF for LaTeX, and SVG for editing. The plain-text formats describe figures and list their image paths; they cannot embed graphical images.
-
