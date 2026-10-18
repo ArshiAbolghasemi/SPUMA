@@ -225,6 +225,7 @@ The positive class is an incorrect final Mathematician answer. AUROC is the prob
 | --- | --- | --- |
 | AUROC | 0.9242 [0.8754, 0.9661] | 0.9165 [0.8889, 0.9418] |
 | AUPRC / average precision | 0.7626 [0.6292, 0.8901] | 0.7555 [0.6757, 0.8344] |
+| AUARC | 0.9512 [0.9203, 0.9737] | 0.9413 [0.9228, 0.9574] |
 | QA accuracy | 0.7800 [0.7200, 0.8301] | 0.7500 [0.7120, 0.7860] |
 
 | Test ranking score | AUROC | Average precision |
@@ -250,8 +251,14 @@ The joint SPN ranks incorrect answers usefully, but ranking quality does not est
 | ECE (15 bins) | 0.0779 | [0.0625, 0.1112] |
 | Binary risk NLL | 0.3569 | [0.3151, 0.4010] |
 | Area under risk-coverage | 0.0587 | [0.0426, 0.0772] |
-| Area under accuracy-coverage | 0.9413 | [0.9228, 0.9574] |
+| AUARC (area under accuracy-coverage) | 0.9413 | [0.9228, 0.9574] |
 
 Brier score averages squared probability errors. ECE summarizes the absolute difference between predicted and observed error probability over 15 equal-width bins. Binary risk NLL scores the correctness-label probability and differs from the response-token NLL used as an input feature. Lower values are better for these three measures; an ECE of 0.0779 does not justify claiming perfect calibration, and binning can hide local deviations.
 
-The reported AURC is the mean retained-set error rate over coverage k/n, k=1,...,n. AUARC is one minus AURC under the repository's convention. These metrics describe selective ranking on existing answers, not an intervention that improves the generated mathematical solutions.
+AUARC (area under the accuracy-coverage curve) measures how accurately the system answers when it retains progressively larger sets of its lowest-risk answers. Sort answers by increasing predicted error probability, retain the first k of n answers, and calculate their accuracy at coverage k/n. Higher AUARC is better; ties use the expected accuracy under a uniformly random ordering within each tied-score group.
+
+$$
+\operatorname{AUARC}=\frac{1}{n}\sum_{k=1}^{n}\operatorname{Accuracy}(k/n)=1-\operatorname{AURC}.
+$$
+
+The joint SPN achieves validation AUARC **0.9512** and test AUARC **0.9413**. The test value summarizes retained-set accuracy across all coverage levels; it does not mean that full-test answer accuracy is 94.13%. Full coverage still gives the observed **75.0%** accuracy. AURC averages retained-set error over the same coverage grid. These metrics describe selective ranking on existing answers, not an intervention that improves the generated mathematical solutions.
