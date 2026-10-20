@@ -9,6 +9,8 @@ import yaml
 from spuma.config import PROJECT_ROOT, SETTINGS_FILE_ENV, Settings, get_settings, load_settings
 from spuma.config.settings import _redact
 from spuma.experiments.registry import EXPERIMENTS
+from spuma.ood.config import load_ood_config
+from spuma.ood.registry import OOD_EVALUATIONS
 
 
 def test_project_config_is_valid(config):
@@ -206,8 +208,11 @@ def test_dotenv_exported_not_in_config(tmp_path, monkeypatch):
     assert "hf_secret" not in json.dumps(config.sanitized())
 
 
-def test_every_yaml_file_is_an_experiments_settings_file():
+def test_every_yaml_file_is_an_experiment_or_ood_settings_file():
     found = {p for p in Path(PROJECT_ROOT).rglob("*.y*ml") if ".venv" not in p.parts and "artifacts" not in p.parts}
-    assert found == {e.config_file for e in EXPERIMENTS.values()}, found
-    for path in found:
-        assert yaml.safe_load(path.read_text())
+    experiments = {e.config_file for e in EXPERIMENTS.values()}
+    assert found == experiments | set(OOD_EVALUATIONS.values()), found
+    for name, e in EXPERIMENTS.items():
+        assert e.config_file.stem == name and yaml.safe_load(e.config_file.read_text())
+    for name, path in OOD_EVALUATIONS.items():
+        assert load_ood_config(path).name == name

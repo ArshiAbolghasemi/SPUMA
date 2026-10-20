@@ -88,7 +88,7 @@ def main() -> None:
     )
     parser.add_argument("--backend", action="append", choices=["transformers", "vllm"], required=True)
     parser.add_argument("--problems", type=int, default=8)
-    parser.add_argument("--config", help="path to the config file (default: config/config-qwen-math.yaml)")
+    parser.add_argument("--config", help="path to the config file (default: config/math_ma_qwen_feedbackloop.yaml)")
     args = parser.parse_args()
 
     if args.config:

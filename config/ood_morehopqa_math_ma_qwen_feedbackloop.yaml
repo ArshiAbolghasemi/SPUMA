@@ -1,0 +1,21 @@
+# OOD evaluation: the MATH-trained Qwen2.5-7B Mathematician/Enthusiast SPN on MoreHopQA (human-verified test set).
+# Agents, prompts, generation, uncertainty and features come from `source_config`; only the dataset changes.
+
+ood:
+  name: ood_morehopqa_math_ma_qwen_feedbackloop
+  source_config: config/math_ma_qwen_feedbackloop.yaml
+  checkpoint: artifacts/ma_qwen_math/generation-73c7092a6566/scored-fbc4ac53ebbc/models/spn.pt
+  risk_model: spn
+  output_dir: artifacts
+  metrics: [auroc, auprc, auarc, aurc, brier, ece, nll, accuracy]
+  dataset:
+    name: morehopqa
+    source: huggingface
+    hf_path: alabnii/morehopqa
+    revision: e839079eb8eb686ecf42c6d334a87964f1b90eef
+    data_files: verified/test-00000-of-00001.parquet
+    subsets: []
+    seed: 42
+    train_samples: 0
+    validation_samples: 0
+    test_samples: 400

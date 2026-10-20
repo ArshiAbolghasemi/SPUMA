@@ -5,9 +5,11 @@ from collections.abc import Callable
 from spuma.config import get_settings
 from spuma.dataset.base import AnswerGrader, DatasetProvider
 from spuma.dataset.math import MathDataset, MathVerifyGrader
+from spuma.dataset.morehopqa import MoreHopQADataset, MoreHopQAGrader
 
 DATASETS: dict[str, tuple[Callable[[], DatasetProvider], Callable[[], AnswerGrader]]] = {
     "math": (MathDataset, MathVerifyGrader),
+    "morehopqa": (MoreHopQADataset, MoreHopQAGrader),
 }
 
 

@@ -8,7 +8,7 @@ from spuma.config import PROJECT_ROOT
 from spuma.experiments.base import Experiment
 
 EXPERIMENT = Experiment(
-    name="math",
-    config_file=PROJECT_ROOT / "config" / "config-qwen-math.yaml",
+    name="math_ma_qwen_feedbackloop",
+    config_file=PROJECT_ROOT / "config" / "math_ma_qwen_feedbackloop.yaml",
     description="MATH, Qwen2.5-7B-Instruct Mathematician <-> Enthusiast feedback loop",
 )
