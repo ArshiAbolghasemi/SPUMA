@@ -6,5 +6,5 @@ from pathlib import Path
 from spuma.config import PROJECT_ROOT
 
 OOD_EVALUATIONS: dict[str, Path] = {
-    name: PROJECT_ROOT / "config" / f"{name}.yaml" for name in ("ood_morehopqa_math_ma_qwen_feedbackloop",)
+    name: PROJECT_ROOT / "config" / f"{name}.yaml" for name in ("ood_morehopqa_math_ma_qwen2_5_7b_feedbackloop",)
 }

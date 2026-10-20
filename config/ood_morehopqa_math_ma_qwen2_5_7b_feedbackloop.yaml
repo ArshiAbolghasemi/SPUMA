@@ -2,8 +2,8 @@
 # Agents, prompts, generation, uncertainty and features come from `source_config`; only the dataset changes.
 
 ood:
-  name: ood_morehopqa_math_ma_qwen_feedbackloop
-  source_config: config/math_ma_qwen_feedbackloop.yaml
+  name: ood_morehopqa_math_ma_qwen2_5_7b_feedbackloop
+  source_config: config/math_ma_qwen2_5_7b_feedbackloop.yaml
   checkpoint: artifacts/ma_qwen_math/generation-73c7092a6566/scored-fbc4ac53ebbc/models/spn.pt
   risk_model: spn
   output_dir: artifacts

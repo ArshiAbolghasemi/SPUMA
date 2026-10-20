@@ -113,9 +113,9 @@ def test_source_settings_must_reproduce_the_checkpoint_pipeline(source, tmp_path
 
 
 def test_ood_config_file_is_validated(tmp_path):
-    good = load_ood_config(OOD_EVALUATIONS["ood_morehopqa_math_ma_qwen_feedbackloop"])
-    assert good.name == "ood_morehopqa_math_ma_qwen_feedbackloop"
-    assert good.source_config.name == "math_ma_qwen_feedbackloop.yaml"
+    good = load_ood_config(OOD_EVALUATIONS["ood_morehopqa_math_ma_qwen2_5_7b_feedbackloop"])
+    assert good.name == "ood_morehopqa_math_ma_qwen2_5_7b_feedbackloop"
+    assert good.source_config.name == "math_ma_qwen2_5_7b_feedbackloop.yaml"
     assert good.dataset.name == "morehopqa" and good.dataset.test_samples == 400 and good.checkpoint.is_absolute()
     bad = tmp_path / "x.yaml"
     bad.write_text(
@@ -157,12 +157,14 @@ def test_ood_config_file_is_validated(tmp_path):
 
 def test_cli_lists_and_runs_by_name(monkeypatch, capsys):
     assert cli.main(["--list"]) == 0
-    assert "ood_morehopqa_math_ma_qwen_feedbackloop" in capsys.readouterr().out
+    assert "ood_morehopqa_math_ma_qwen2_5_7b_feedbackloop" in capsys.readouterr().out
     ran = []
     monkeypatch.setattr(
         cli.OODEvaluation, "run", lambda self, phases, limit: ran.append((self.config.name, phases, limit))
     )
-    assert cli.main(["--ood", "ood_morehopqa_math_ma_qwen_feedbackloop", "--phase", "evaluate", "--limit", "3"]) == 0
-    assert ran == [("ood_morehopqa_math_ma_qwen_feedbackloop", ["evaluate"], 3)]
+    assert (
+        cli.main(["--ood", "ood_morehopqa_math_ma_qwen2_5_7b_feedbackloop", "--phase", "evaluate", "--limit", "3"]) == 0
+    )
+    assert ran == [("ood_morehopqa_math_ma_qwen2_5_7b_feedbackloop", ["evaluate"], 3)]
     with pytest.raises(SystemExit):
         cli.main(["--ood", "unknown"])

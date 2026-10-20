@@ -1,9 +1,9 @@
 """Run SPUMA experiments: generate -> score -> train -> evaluate. Without --experiment, every registered one runs.
 
     uv run python -m spuma.experiments                                       # all experiments, every phase
-    uv run python -m spuma.experiments --experiment math_ma_qwen_feedbackloop  # one experiment, by name
+    uv run python -m spuma.experiments --experiment math_ma_qwen2_5_7b_feedbackloop  # one experiment, by name
     uv run python -m spuma.experiments --phase train --phase evaluate        # from saved artifacts
-    uv run python -m spuma.experiments --experiment math_ma_qwen_feedbackloop --limit 5  # smoke run: 5 per split
+    uv run python -m spuma.experiments --experiment math_ma_qwen2_5_7b_feedbackloop --limit 5  # smoke run: 5 per split
     uv run python -m spuma.experiments --list                                # registered experiments
 
 Each experiment runs with its own settings file (SPUMA_* environment overrides apply to every experiment).

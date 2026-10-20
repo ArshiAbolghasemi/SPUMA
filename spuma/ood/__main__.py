@@ -1,8 +1,8 @@
 """OOD evaluation of a frozen SPN on another dataset. Without --ood, every registered OOD evaluation runs.
 
     uv run python -m spuma.ood                                                         # all, every phase
-    uv run python -m spuma.ood --ood ood_morehopqa_math_ma_qwen_feedbackloop           # one, by name
-    uv run python -m spuma.ood --ood ood_morehopqa_math_ma_qwen_feedbackloop --limit 5 # smoke run: 5 problems
+    uv run python -m spuma.ood --ood ood_morehopqa_math_ma_qwen2_5_7b_feedbackloop           # one, by name
+    uv run python -m spuma.ood --ood ood_morehopqa_math_ma_qwen2_5_7b_feedbackloop --limit 5 # smoke run: 5 problems
     uv run python -m spuma.ood --phase evaluate                                        # re-evaluate saved features
     uv run python -m spuma.ood --list                                                  # registered OOD evaluations
 

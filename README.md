@@ -26,7 +26,7 @@ Each experiment is run by name; the name maps to its settings file `config/<name
 
 | experiment | module | settings | dataset | splits (train / validation / test) | what it runs |
 |---|---|---|---|---|---|
-| `math_ma_qwen_feedbackloop` | `spuma/experiments/math.py` | `config/math_ma_qwen_feedbackloop.yaml` | [MATH](https://huggingface.co/datasets/EleutherAI/hendrycks_math) (Hendrycks et al., 2021) | 800 / 200 from official train, 500 from official test | Qwen2.5-7B-Instruct Mathematician <-> Enthusiast feedback |
+| `math_ma_qwen2_5_7b_feedbackloop` | `spuma/experiments/math.py` | `config/math_ma_qwen2_5_7b_feedbackloop.yaml` | [MATH](https://huggingface.co/datasets/EleutherAI/hendrycks_math) (Hendrycks et al., 2021) | 800 / 200 from official train, 500 from official test | Qwen2.5-7B-Instruct Mathematician <-> Enthusiast feedback |
 
 A settings file defines everything about its experiment: dataset and splits, model and backends
 (`model.backend` for generation, `model.scoring_backend` for teacher-forced scoring), agents and their
@@ -38,8 +38,8 @@ can be overridden from the environment with the `SPUMA_` prefix and `__` for nes
 
 ```bash
 scripts/run-experiments.sh                                  # every registered experiment, every phase
-scripts/run-experiments.sh --experiment math_ma_qwen_feedbackloop           # one experiment by name (repeatable)
-scripts/run-experiments.sh --experiment math_ma_qwen_feedbackloop --limit 5 # smoke run: 5 problems per split
+scripts/run-experiments.sh --experiment math_ma_qwen2_5_7b_feedbackloop           # one experiment by name (repeatable)
+scripts/run-experiments.sh --experiment math_ma_qwen2_5_7b_feedbackloop --limit 5 # smoke run: 5 problems per split
 scripts/run-experiments.sh --list                           # registered experiments
 ```
 
@@ -55,8 +55,8 @@ Phases run in order and can be selected with `--phase` (repeatable):
 Re-use saved work instead of recomputing it:
 
 ```bash
-scripts/run-experiments.sh --experiment math_ma_qwen_feedbackloop --phase score --phase train --phase evaluate
-scripts/run-experiments.sh --experiment math_ma_qwen_feedbackloop --phase train --phase evaluate
+scripts/run-experiments.sh --experiment math_ma_qwen2_5_7b_feedbackloop --phase score --phase train --phase evaluate
+scripts/run-experiments.sh --experiment math_ma_qwen2_5_7b_feedbackloop --phase train --phase evaluate
 ```
 
 Artifacts go to `artifacts/<experiment.name>/`. Directory names carry fingerprints of the settings that
@@ -92,13 +92,13 @@ uncertainty and aggregation run on the OOD problems, and the checkpoint predicts
 Nothing is trained, tuned or recalibrated; the checkpoint's SHA-256 is checked before and after.
 
 ```bash
-scripts/run-ood.sh --ood ood_morehopqa_math_ma_qwen_feedbackloop                    # generate, score, evaluate
-scripts/run-ood.sh --ood ood_morehopqa_math_ma_qwen_feedbackloop --limit 5          # smoke run
-scripts/run-ood.sh --ood ood_morehopqa_math_ma_qwen_feedbackloop --phase evaluate   # re-evaluate saved features
+scripts/run-ood.sh --ood ood_morehopqa_math_ma_qwen2_5_7b_feedbackloop                    # generate, score, evaluate
+scripts/run-ood.sh --ood ood_morehopqa_math_ma_qwen2_5_7b_feedbackloop --limit 5          # smoke run
+scripts/run-ood.sh --ood ood_morehopqa_math_ma_qwen2_5_7b_feedbackloop --phase evaluate   # re-evaluate saved features
 scripts/run-ood.sh --list                                                           # registered OOD evaluations
 ```
 
-`ood_morehopqa_math_ma_qwen_feedbackloop` (`config/ood_morehopqa_math_ma_qwen_feedbackloop.yaml`) evaluates the MATH-trained SPN on 400 seeded questions from the human-verified
+`ood_morehopqa_math_ma_qwen2_5_7b_feedbackloop` (`config/ood_morehopqa_math_ma_qwen2_5_7b_feedbackloop.yaml`) evaluates the MATH-trained SPN on 400 seeded questions from the human-verified
 MoreHopQA test set (closed-book, pinned Hub revision). The source settings must reproduce the checkpoint's
 `generation-<fp>/scored-<fp>/` fingerprints, so the OOD features are computed exactly as in training. Outputs go
 to `artifacts/<ood.name>/`: the merged `settings.yaml`, trajectories, `steps.jsonl` and `step_metrics.json`

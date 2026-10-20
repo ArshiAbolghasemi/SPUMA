@@ -11,8 +11,8 @@ from spuma.experiments.base import Experiment
 
 
 def test_math_experiment_is_registered_with_its_settings():
-    math = registry.EXPERIMENTS["math_ma_qwen_feedbackloop"]
-    assert math.config_file.name == "math_ma_qwen_feedbackloop.yaml"
+    math = registry.EXPERIMENTS["math_ma_qwen2_5_7b_feedbackloop"]
+    assert math.config_file.name == "math_ma_qwen2_5_7b_feedbackloop.yaml"
     settings = math.activate()
     assert settings.experiment.name == "ma_qwen_math" and settings.dataset.name == "math"
     assert [a.id for a in settings.agents.enabled] == ["mathematician", "enthusiast"]
