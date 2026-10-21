@@ -10,7 +10,7 @@ from spuma.dataset.config import DatasetConfig
 from spuma.experiments.runner import ExperimentRunner
 from spuma.experiments.tests.test_e2e import Engines, FakeDataset, _is_wrong, fake_capabilities  # noqa: F401
 from spuma.ood import __main__ as cli
-from spuma.ood.config import OODConfig, load_ood_config
+from spuma.ood.config import OODAgentPrompt, OODConfig, load_ood_config
 from spuma.ood.evaluation import OODEvaluation, sha256
 from spuma.ood.registry import OOD_EVALUATIONS
 
@@ -117,6 +117,7 @@ def test_ood_config_file_is_validated(tmp_path):
     assert good.name == "ood_morehopqa_math_ma_qwen2_5_7b_feedbackloop"
     assert good.source_config.name == "math_ma_qwen2_5_7b_feedbackloop.yaml"
     assert good.dataset.name == "morehopqa" and good.dataset.test_samples == 400 and good.checkpoint.is_absolute()
+    assert {k: v.role for k, v in good.agents.items()} == {"mathematician": "solver", "enthusiast": "reviewer"}
     bad = tmp_path / "x.yaml"
     bad.write_text(
         yaml.safe_dump(
@@ -168,3 +169,17 @@ def test_cli_lists_and_runs_by_name(monkeypatch, capsys):
     assert ran == [("ood_morehopqa_math_ma_qwen2_5_7b_feedbackloop", ["evaluate"], 3)]
     with pytest.raises(SystemExit):
         cli.main(["--ood", "unknown"])
+
+
+def test_ood_agents_replace_roles_and_prompts_after_the_fingerprint_check(source, tmp_path):
+    prompts = {
+        "mathematician": OODAgentPrompt(role="solver", system_prompt="Answer with \\boxed{}."),
+        "enthusiast": OODAgentPrompt(role="reviewer", system_prompt="Review.", user_template="{problem}\n{previous}"),
+    }
+    OODEvaluation(_ood(source, tmp_path, agents=prompts)).activate()
+    agents = {a.id: a for a in get_settings().agents.enabled}
+    assert (agents["mathematician"].role, agents["mathematician"].system_prompt) == ("solver", "Answer with \\boxed{}.")
+    assert agents["enthusiast"].user_template == "{problem}\n{previous}"
+    assert get_settings().agents.workflow == "feedback"
+    with pytest.raises(ValueError, match="must name the source agents"):
+        OODEvaluation(_ood(source, tmp_path, agents={"solver": prompts["mathematician"]})).activate()

@@ -38,7 +38,7 @@ from spuma.config import get_settings
 from spuma.models.backend import GenerationRequest, ModelBackend, require
 from spuma.models.config import GenerationConfig
 from spuma.uncertainty.config import MonteCarloConfig, SemanticEntropyConfig
-from spuma.uncertainty.equivalence import AnswerAwareNLI
+from spuma.uncertainty.equivalence import AnswerAwareNLI, answer_equivalence
 
 logger = logging.getLogger(__name__)
 
@@ -117,10 +117,14 @@ def load_nli() -> Any:
 def load_uqlm_semantic_entropy() -> Any:
     """UQLM's semantic-entropy scorer on our equivalence, length-normalized like MCSP.
 
-    `equivalence: answer_aware` (default): math-verify for texts that box an answer, the NLI model for the
-    rest (`AnswerAwareNLI`, which loads the model only when needed). `nli`: the NLI model for every pair.
+    `equivalence: answer_aware` (default): the dataset's answer comparison (`answer_equivalence`) for texts that
+    box an answer, the NLI model for the rest (`AnswerAwareNLI`, which loads the model only when needed).
+    `nli`: the NLI model for every pair.
     """
-    nli = AnswerAwareNLI(load_nli) if _se().equivalence == "answer_aware" else load_nli()
+    if _se().equivalence == "answer_aware":
+        nli = AnswerAwareNLI(load_nli, answer_equivalence(get_settings().dataset.name))
+    else:
+        nli = load_nli()
     return UQLMSemanticEntropy(
         llm=None, use_best=False, prompts_in_nli=False, nli=nli, length_normalize=_mc().length_normalize
     )

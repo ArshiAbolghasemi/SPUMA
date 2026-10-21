@@ -1,10 +1,29 @@
 # OOD evaluation: the MATH-trained Qwen2.5-7B Mathematician/Enthusiast SPN on MoreHopQA (human-verified test set).
-# Agents, prompts, generation, uncertainty and features come from `source_config`; only the dataset changes.
+# Workflow, agents, generation, uncertainty and features come from `source_config`; the dataset and the agents'
+# roles and prompts (a multi-hop QA solver and reviewer in the same feedback loop) change.
 
 ood:
   name: ood_morehopqa_math_ma_qwen2_5_7b_feedbackloop
   source_config: config/math_ma_qwen2_5_7b_feedbackloop.yaml
   checkpoint: artifacts/ma_qwen_math/generation-73c7092a6566/scored-fbc4ac53ebbc/models/spn.pt
+  agents:
+    mathematician:
+      role: solver
+      system_prompt: >-
+        You are the Solver, an expert in multi-hop question answering. Answer questions accurately from your
+        own knowledge by breaking them into intermediate facts and reasoning steps, explain your reasoning
+        clearly, and respond to the Reviewer's questions and feedback. Correct mistakes when necessary,
+        maintain conversation context, and present the final answer, as short as possible (a name, date,
+        number or phrase), using \boxed{}.
+      user_template: "Answer the following question:\n\n{problem}"
+    enthusiast:
+      role: reviewer
+      system_prompt: >-
+        You are the Reviewer, collaborating with the Solver. Carefully examine the Solver's answers, check
+        each intermediate fact and reasoning step, ask relevant questions, request clarifications, and provide
+        constructive feedback. Do not answer the question yourself. When the answer is sufficiently complete
+        and convincing, end your response with TASK_DONE. Otherwise, continue the discussion naturally.
+      user_template: "Original question:\n{problem}\n\nLatest response from the Solver:\n{previous}\n\nReview the response and provide your next question or feedback. If the answer is complete, end with TASK_DONE."
   risk_model: spn
   output_dir: artifacts
   metrics: [auroc, auprc, auarc, aurc, brier, ece, nll, accuracy]

@@ -1,10 +1,12 @@
 """OOD evaluation of a frozen SPN: run the source experiment's agents and uncertainty on a new dataset, feed the
 aggregated features to the trained risk model, and score its error probabilities against the OOD labels.
 
-    1. settings: the source experiment's settings file with only `dataset:` and `experiment.name/output_dir`
-       replaced (saved as <output>/settings.yaml). Its generation and feature fingerprints must equal the
-       checkpoint's `generation-<fp>/scored-<fp>/` directories, so agents, prompts, sampling, rounds,
-       uncertainty, aggregation and feature order are exactly those the SPN was trained on.
+    1. settings: the source experiment's settings file with `dataset:` and `experiment.name/output_dir`
+       replaced. Before `ood.agents` is applied, its generation and feature fingerprints must equal the
+       checkpoint's `generation-<fp>/scored-<fp>/` directories, so workflow, agents, sampling, rounds,
+       uncertainty, aggregation and feature order are exactly those the SPN was trained on. Then each agent's
+       role and prompts are replaced by `ood.agents` (the task changes, the pipeline does not) and the result
+       is saved as <output>/settings.yaml.
     2. generate + score: the unchanged `ExperimentRunner` phases on the OOD test problems (per-step MCSP/SE/NLL/
        length, per-problem features, steps.jsonl).
     3. evaluate: the checkpoint is loaded (never fitted, its SHA-256 checked before and after), P(Y=1|z) is
@@ -62,11 +64,7 @@ class OODEvaluation:
         raw["dataset"] = to_plain(c.dataset)
         raw["experiment"] = {**raw.get("experiment", {}), "name": c.name, "output_dir": str(c.output_dir)}
         self.root.mkdir(parents=True, exist_ok=True)
-        settings_file = self.root / "settings.yaml"
-        settings_file.write_text(yaml.safe_dump(raw, sort_keys=False))
-        os.environ[SETTINGS_FILE_ENV] = str(settings_file)
-        get_settings.cache_clear()
-        settings = get_settings()
+        settings = self._install(raw)
         expected = (_fingerprint(c.checkpoint, "generation-"), _fingerprint(c.checkpoint, "scored-"))
         actual = (settings.generation_fingerprint(), settings.scoring_fingerprint())
         if None not in expected and expected != actual:
@@ -74,6 +72,20 @@ class OODEvaluation:
                 f"source settings do not reproduce the checkpoint's pipeline: generation/scored fingerprints "
                 f"{actual} != checkpoint's {expected}"
             )
+        if c.agents:
+            items = {a["id"]: a for a in raw["agents"]["items"] if a.get("enabled", True)}
+            if set(c.agents) != set(items):
+                raise ValueError(f"ood.agents {sorted(c.agents)} must name the source agents {sorted(items)}")
+            for agent_id, prompt in c.agents.items():
+                items[agent_id].update(to_plain(prompt))
+            self._install(raw)
+
+    def _install(self, raw: dict[str, Any]) -> Any:
+        settings_file = self.root / "settings.yaml"
+        settings_file.write_text(yaml.safe_dump(raw, sort_keys=False))
+        os.environ[SETTINGS_FILE_ENV] = str(settings_file)
+        get_settings.cache_clear()
+        return get_settings()
 
     def run(self, phases: list[str] | None = None, limit: int | None = None) -> dict[str, Any] | None:
         phases = phases or ["generate", "score", "evaluate"]

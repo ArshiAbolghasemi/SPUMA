@@ -13,12 +13,22 @@ from spuma.evaluation.metrics import METRICS
 
 
 @dataclass(frozen=True)
+class OODAgentPrompt:
+    """The task-specific part of one source agent: its role and prompts on the OOD dataset."""
+
+    role: str
+    system_prompt: str
+    user_template: str = "{problem}"
+
+
+@dataclass(frozen=True)
 class OODConfig:
     """`ood:` section.
 
-    `source_config` is the experiment settings file the checkpoint was trained with; agents, prompts,
-    generation, uncertainty, aggregation and features all come from it, and only `dataset` and the output
-    location are replaced. `id_evaluation` defaults to the `evaluation.json` next to the checkpoint's
+    `source_config` is the experiment settings file the checkpoint was trained with; the workflow, agents,
+    generation, uncertainty, aggregation and features all come from it, and only `dataset`, the output
+    location and, through `agents`, each agent's role and prompts (keyed by the source agent id, which names
+    its features) are replaced. `id_evaluation` defaults to the `evaluation.json` next to the checkpoint's
     `models/` directory.
     """
 
@@ -26,6 +36,7 @@ class OODConfig:
     source_config: Path
     checkpoint: Path
     dataset: DatasetConfig
+    agents: dict[str, OODAgentPrompt] = field(default_factory=dict)
     risk_model: str = "spn"
     id_evaluation: Path | None = None
     output_dir: Path = Path("artifacts")

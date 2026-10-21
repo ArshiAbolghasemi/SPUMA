@@ -9,7 +9,7 @@ from uqlm.nli.nli import NLI
 from spuma.agents.trajectory import AgentTrace, StepRecord, Trajectory
 from spuma.models.backend import BackendCapabilities, BackendCapabilityError
 from spuma.uncertainty.aggregation import aggregate_agent, mean, rms
-from spuma.uncertainty.equivalence import AnswerAwareNLI
+from spuma.uncertainty.equivalence import AnswerAwareNLI, answer_equivalence
 from spuma.uncertainty.estimators import (
     MC_SAMPLES_KEY,
     LabelOrderedNLI,
@@ -360,3 +360,23 @@ def test_answer_aware_loads_nli_only_when_needed():
         r["entailment"] for r in nli.get_nli_results_batch([("\\boxed{3}", "so \\boxed{3.0}"), ("\\boxed{3}", "x")])
     ] == [True, False]
     assert loads == [] and nli.counts == {"math_verify": 1, "answer_vs_none": 1, "nli": 0}
+
+
+@pytest.mark.parametrize(
+    ("dataset", "a", "b", "same"),
+    [
+        ("math", "\\frac{1}{2}", "0.5", True),
+        ("math", "32 \\text{ miles per hour}", "32", True),
+        ("math", "0 \\text{ and } 4", "0, 4", True),
+        ("math", "\\begin{pmatrix} 0 \\\\ -5 \\end{pmatrix}", "\\begin{pmatrix} 0 \\\\ 5 \\end{pmatrix}", False),
+        ("morehopqa", "\\frac{1}{2}", "0.5", True),
+        ("morehopqa", "\\text{Sunday}", "Sunday", True),
+        ("morehopqa", "the Beatles", "Beatles", True),
+        ("morehopqa", "May 5, 1990", "5 May 1990", True),
+        ("morehopqa", "May 1990", "May 5, 1990", False),
+        ("morehopqa", "listen", "silent", False),
+        ("morehopqa", "John Smith", "Smith John", False),
+    ],
+)
+def test_boxed_answers_are_compared_per_dataset(dataset, a, b, same):
+    assert answer_equivalence(dataset)(a, b) is same
