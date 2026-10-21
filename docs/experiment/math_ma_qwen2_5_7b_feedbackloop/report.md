@@ -81,7 +81,16 @@ This run records Monte Carlo sequence probability (MCSP), likelihood-weighted se
 For context c and response y of length L, the implementation defines a length-normalized sequence score q(y) by the geometric mean of token probabilities. This score lies between zero and one, but is not a normalized probability distribution over all possible response strings.
 
 $$
-q(y\mid c)=\exp\!\left(\frac{1}{L}\sum_{t=1}^{L}\log p_\theta(y_t\mid c,y_{<t})\right),\qquad \mathrm{NLL}(y)=-\frac{1}{L}\sum_{t=1}^{L}\log p_\theta(y_t\mid c,y_{<t}).
+\begin{aligned}
+q_\theta(y \mid c)
+&= \exp\left(
+\frac{1}{L} \sum_{t=1}^{L}
+\log p_\theta(y_t \mid c, y_{<t})
+\right), \\
+\mathrm{NLL}_\theta(y \mid c)
+&= -\frac{1}{L} \sum_{t=1}^{L}
+\log p_\theta(y_t \mid c, y_{<t}).
+\end{aligned}
 $$
 
 MCSP averages q over the actual response and its ten independently seeded alternatives. It summarizes sampled response confidence, rather than entropy over the next-token vocabulary.
@@ -258,7 +267,7 @@ Brier score averages squared probability errors. ECE summarizes the absolute dif
 AUARC (area under the accuracy-coverage curve) measures how accurately the system answers when it retains progressively larger sets of its lowest-risk answers. Sort answers by increasing predicted error probability, retain the first k of n answers, and calculate their accuracy at coverage k/n. Higher AUARC is better; ties use the expected accuracy under a uniformly random ordering within each tied-score group.
 
 $$
-\operatorname{AUARC}=\frac{1}{n}\sum_{k=1}^{n}\operatorname{Accuracy}(k/n)=1-\operatorname{AURC}.
+\mathrm{AUARC} = \frac{1}{n} \sum_{k=1}^{n} \mathrm{Accuracy}(k/n) = 1 - \mathrm{AURC}
 $$
 
 The joint SPN achieves validation AUARC **0.9512** and test AUARC **0.9413**. The test value summarizes retained-set accuracy across all coverage levels; it does not mean that full-test answer accuracy is 94.13%. Full coverage still gives the observed **75.0%** accuracy. AURC averages retained-set error over the same coverage grid. These metrics describe selective ranking on existing answers, not an intervention that improves the generated mathematical solutions.
