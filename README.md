@@ -28,6 +28,8 @@ Each experiment is run by name; the name maps to its settings file `config/<name
 |---|---|---|---|---|---|
 | `math_ma_qwen2_5_7b_feedbackloop` | `spuma/experiments/math.py` | `config/math_ma_qwen2_5_7b_feedbackloop.yaml` | [MATH](https://huggingface.co/datasets/EleutherAI/hendrycks_math) (Hendrycks et al., 2021) | 800 / 200 from official train, 500 from official test | Qwen2.5-7B-Instruct Mathematician <-> Enthusiast feedback |
 
+See the [MATH experiment report](docs/experiment/math_ma_qwen2_5_7b_feedbackloop/report.md) for results and analysis.
+
 A settings file defines everything about its experiment: dataset and splits, model and backends
 (`model.backend` for generation, `model.scoring_backend` for teacher-forced scoring), agents and their
 prompts, uncertainty estimation, SPN, evaluation, and `experiment.name` (its artifact directory). Any value
