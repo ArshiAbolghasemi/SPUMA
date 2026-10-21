@@ -285,7 +285,7 @@ Mean predicted risk is **44.68%**, compared with **86.75%** observed errors. Cor
 AUARC averages accuracy over the subsets retained by increasing predicted risk. Higher is better. Equal scores use the expected accuracy under a uniformly random ordering within each tied group.
 
 $$
-\operatorname{AUARC}=\frac{1}{n}\sum_{k=1}^{n}\operatorname{Accuracy}(k/n)=1-\operatorname{AURC}.
+\mathrm{AUARC} = \frac{1}{n} \sum_{k=1}^{n} \mathrm{Accuracy}(k/n) = 1 - \mathrm{AURC}
 $$
 
 | Coverage | Answers retained | Retained-set accuracy |
