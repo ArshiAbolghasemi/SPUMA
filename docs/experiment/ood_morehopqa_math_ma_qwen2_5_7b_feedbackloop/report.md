@@ -76,21 +76,6 @@ At 10% coverage, accuracy rises from **13.25% to 42.5%**. That is a meaningful i
 
 AUARC summarizes retained-answer accuracy across all coverage levels and is **0.2454**. It should not be read as the accuracy when answering every question, which remains 13.25%. The coverage results describe this sample; they do not establish a threshold for future use.
 
-### Why AUARC is 0.94 on MATH but 0.25 here
-
-AUARC averages the accuracy of the retained answers over every coverage level, so it is bounded by how many correct answers exist. A random ordering scores about the overall accuracy. A perfect ordering keeps all correct answers first, giving accuracy 1 until they run out and c/k afterwards (c correct answers, k retained):
-
-$$
-\operatorname{AUARC}_{\text{oracle}}=\frac{1}{n}\Big(c+\sum_{k=c+1}^{n}\frac{c}{k}\Big).
-$$
-
-| Dataset | Accuracy | Random AUARC | SPN AUARC | Oracle AUARC | Share of random→oracle gap closed |
-|---|---:|---:|---:|---:|---:|
-| MATH (test, n = 500) | 75.00% | 0.7500 | 0.9413 | 0.9655 | 88.8% |
-| MoreHopQA (n = 400) | 13.25% | 0.1325 | 0.2454 | 0.3992 | 42.3% |
-
-With 53 correct answers out of 400, even a perfect risk model could not exceed **0.399**. Most of the drop from 0.94 to 0.25 therefore comes from the drop in answer accuracy, not from the ranking. The ranking also weakens: the SPN closes 42.3% of the random-to-oracle gap on MoreHopQA versus 88.8% on MATH, consistent with AUROC falling from 0.9165 to 0.6955. Raw AUARC values are not comparable across datasets with different accuracy.
-
 ## Predicted risk is far below the actual error rate
 
 The largest problem is the probability scale. The SPN predicts an average error risk of **44.68%**, while **86.75%** of answers are actually wrong: a gap of **42.07 percentage points**.
@@ -154,7 +139,3 @@ The frozen SPN carries some useful error-ranking information into multi-hop QA. 
 The evidence comes from one model, one QA setup, one sampled test set, and one generation seed. The bootstrap intervals capture uncertainty from resampling those questions; they do not capture variation across new generation runs or model checkpoints. These closed-book results also do not establish performance when supporting evidence is available.
 
 Grading may reject acceptable aliases that fall outside its matching rules. The incorrect answers have not all been manually audited, so the reported error count should be understood as the outcome of the specified grader. Any recalibration or answer-acceptance policy would need a separate QA validation set and a fresh held-out evaluation.
-
-## Result sources
-
-This report uses the QA run from **October 21, 2026**, identified as `20261021T112350-3fbabc`. The supporting records are the [experiment configuration](../../../config/ood_morehopqa_math_ma_qwen2_5_7b_feedbackloop.yaml), [saved predictions and evaluation](../../../artifacts/ood_morehopqa_math_ma_qwen2_5_7b_feedbackloop/generation-e40c1863a624/scored-fbc4ac53ebbc/ood_evaluation.json), and [per-question features and conversation outcomes](../../../artifacts/ood_morehopqa_math_ma_qwen2_5_7b_feedbackloop/generation-e40c1863a624/scored-fbc4ac53ebbc/features.json).
