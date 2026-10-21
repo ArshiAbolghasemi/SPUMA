@@ -1,141 +1,297 @@
-# How well does SPUMA recognize its mistakes on multi-hop QA?
+# SPUMA: Qwen2.5-7B Multi-hop QA OOD Experiment
 
-This experiment tests whether SPUMA can recognize unreliable answers when moving to a new task. A sum-product network (SPN), previously trained to estimate error risk on MATH, is evaluated on 400 MoreHopQA questions. The risk model stays frozen throughout the experiment.
+## Introduction
 
-The main finding is that **SPUMA can partly distinguish correct answers from incorrect ones, but it is much too optimistic about how often the answers are wrong**. Answer accuracy is only **13.25%**. Selecting the answers with the lowest predicted risk improves accuracy, although even the best-ranked 10% contain more wrong answers than correct ones.
+This experiment asks whether a joint sum-product network (SPN), trained to estimate final-answer error risk on MATH, remains useful on closed-book multi-hop question answering. A Solver proposes and revises an answer; a Reviewer checks intermediate facts, asks questions, and decides when the discussion is complete. Both roles use Qwen/Qwen2.5-7B-Instruct. The SPN estimates error risk from their conversation and remains frozen throughout the QA evaluation.
 
-## How the experiment works
+On 400 held-out MoreHopQA questions, final-answer accuracy is **13.25% (53 correct, 347 incorrect)**. The joint SPN achieves **AUROC 0.6955** and average precision, reported as AUPRC, **0.9327**. It retains some ability to rank errors, but substantially underestimates their frequency: mean predicted error risk is **44.68%**, while the observed error rate is **86.75%**.
 
-Two agents, both using **Qwen/Qwen2.5-7B-Instruct**, work through each question. The Solver is asked to break the question into intermediate facts, explain its reasoning, and give a short final answer inside `\boxed{...}`. The Reviewer checks the reasoning, asks for clarification, and provides feedback. It ends the discussion with `TASK_DONE` when it considers the answer convincing.
+An exploratory single-signal comparison finds that Solver RMS semantic entropy alone achieves **AUROC 0.8293** and average precision **0.9675**, above the joint SPN. This run therefore supports partial transfer of error ranking, but does not demonstrate an advantage from combining the signals in this SPN. Raw SE is a ranking score; the SPN also produces probability estimates, which are poorly calibrated on these QA questions.
 
-The agents receive only the question. They have no supporting passages, search tools, or retrieved evidence, so the experiment depends on their internal knowledge and reasoning. Up to ten rounds are allowed. Responses are sampled at temperature 0.7 and top-p 1.0, with a maximum of 2,048 new tokens per response.
+The report covers the joint SPN and its QA evaluation. Numeric summaries and figures use the saved predictions and response measurements. No language-model generation, SPN retraining, recalibration, hyperparameter search, or new bootstrap run is performed.
 
-The SPN estimates the probability that the final answer is wrong using four measurements from each agent: Monte Carlo sequence probability, semantic entropy, token negative log-likelihood, and response length. The first two use ten additional sampled responses to measure how consistently the model answers. Measurements are combined across conversation turns before being passed to the SPN. No QA labels are used to retrain or recalibrate it.
+## Dataset, usable samples, and target
 
-The evaluation uses a sample of 400 questions from the human-verified MoreHopQA test set, selected with seed 42. The grader compares the final boxed answer with the reference, allowing normalized text matches and numeric or date equivalence where applicable. A missing extractable boxed answer counts as incorrect.
+The dataset is the human-verified MoreHopQA test set, loaded from `alabnii/morehopqa` at revision `e839079eb8eb686ecf42c6d334a87964f1b90eef`, using `verified/test-00000-of-00001.parquet`. The evaluation samples 400 questions with seed 42. Agents receive only the question, with no supporting passages, retrieval, or search tools. The result therefore reflects closed-book knowledge and reasoning.
 
-## Most answers are wrong, despite reviewer approval
+| Partition | Requested | Usable | Incorrect | Accuracy |
+| --- | ---: | ---: | ---: | ---: |
+| QA test | 400 | 400 | 347 | 13.25% |
 
-The system answers **53 of 400 questions correctly**. Of the 347 incorrect answers, 36 have no extractable boxed answer and 311 have an extracted answer that fails grading.
+No QA examples are used to train or tune the SPN, and no test questions are skipped. Each question yields one feature vector and one final-answer correctness label.
 
-| Final outcome | Questions | Share |
-|---|---:|---:|
-| Correct answer | 53 | 13.25% |
-| Incorrect answer with an extractable answer | 311 | 77.75% |
-| Answer-parsing failure | 36 | 9.00% |
-| **Total** | **400** | **100%** |
+$$
+Y_i=\begin{cases}0,&\text{final Solver answer correct},\\1,&\text{final Solver answer incorrect}.\end{cases}
+$$
 
-Formatting problems explain only a small part of the result. Even among the 364 questions with an extractable answer, accuracy is just **14.56%**.
+The final Solver response is graded, rather than the Reviewer's response. The grader extracts its last boxed answer and compares it with the reference. Text matching normalizes case, punctuation, articles, and whitespace; numeric and date answers also support typed equivalence checks. Missing extractable boxed answers count as incorrect.
 
-Most discussions are brief: **381 questions finish after one Solver–Reviewer exchange**, 14 take two rounds, and five take three. All 400 end with the Reviewer's completion signal, including all 347 incorrect answers. Reviewer approval therefore provides little assurance that the final answer is correct in this run.
+There are **36 parsing failures (9.0%)**, all retained in the main analysis, and **311 extracted answers that fail grading**. Among the 364 questions with an extractable answer, accuracy is still only **14.56% (53/364)**. Formatting failures explain a small part of the low accuracy. The grader assesses final answers, not every intermediate factual claim; acceptable aliases outside its matching rules can still be marked incorrect.
 
-The longer discussions are too few, and arise on a selected subset of questions, to tell us whether extra feedback improves performance.
+## Multi-agent feedback workflow
 
-## The risk scores still help identify errors
+Each round contains two responses. The Solver receives the original question and conversation history, breaks the task into intermediate facts, and gives a short boxed answer. The Reviewer checks the answer and reasoning, asks for clarification, and provides feedback without answering independently. Each role sees its own earlier responses as assistant messages and the other role's responses as user inputs.
 
-The SPN achieves an **AUROC of 0.6955**. In practical terms, when comparing a randomly selected incorrect answer with a randomly selected correct one, it assigns the incorrect answer a higher risk about 69.55% of the time, counting ties as half. This is above chance, but leaves considerable overlap between the two groups.
+The system prompts below are copied from the saved QA configuration, with line wrapping added for readability.
 
-![ROC and precision–recall curves for detecting incorrect QA answers.](assets/error_detection.png)
+Solver system prompt:
 
-*Figure 1. The SPN has useful error-ranking ability. The high precision–recall baseline reflects the fact that 86.75% of answers are already incorrect.*
+```text
+You are the Solver, an expert in multi-hop question answering. Answer questions
+accurately from your own knowledge by breaking them into intermediate facts and
+reasoning steps, explain your reasoning clearly, and respond to the Reviewer's questions
+and feedback. Correct mistakes when necessary, maintain conversation context, and
+present the final answer, as short as possible (a name, date, number or phrase), using
+\boxed{}.
+```
 
-Average precision, reported as AUPRC, is **0.9327**. That value needs context: errors are so common that the no-skill precision reference is already **0.8675**. The score describes detection of wrong answers, not the accuracy of generated answers.
+Reviewer system prompt:
 
-The full results are shown below. The 95% intervals come from 1,000 bootstrap resamples of questions, using seed 42.
+```text
+You are the Reviewer, collaborating with the Solver. Carefully examine the Solver's
+answers, check each intermediate fact and reasoning step, ask relevant questions,
+request clarifications, and provide constructive feedback. Do not answer the question
+yourself. When the answer is sufficiently complete and convincing, end your response
+with TASK_DONE. Otherwise, continue the discussion naturally.
+```
 
-| Measure | Result | 95% interval |
-|---|---:|---:|
-| Answer accuracy | 13.25% | 10.00–16.75% |
-| AUROC | 0.6955 | 0.6141–0.7716 |
-| Average precision (AUPRC) | 0.9327 | 0.9048–0.9568 |
-| Area under the accuracy–coverage curve (AUARC) | 0.2454 | 0.1767–0.3078 |
-| Area under the risk–coverage curve (AURC) | 0.7546 | 0.6922–0.8233 |
-| Brier score | 0.2904 | 0.2740–0.3080 |
-| Expected calibration error (15 bins) | 0.4207 | 0.3888–0.4544 |
-| Final-label negative log-likelihood | 0.7847 | 0.7482–0.8232 |
+The workflow stops when the Reviewer response contains `TASK_DONE`, or after ten rounds. Uncertainty is measured after each response but does not enter the conversation or determine stopping. The ten Monte Carlo alternatives are generated from the frozen context of a response and never become extra dialogue turns. References are used only by the grader; the SPN's predicted risk is evaluated separately.
 
-Higher values are better for the first four measures; lower values are better for the remaining four. The last three assess how closely predicted probabilities agree with actual outcomes.
+![QA feedback workflow and measurement path.](assets/workflow.svg)
 
-## Keeping fewer answers improves accuracy, with a large trade-off
+Figure 1. Feedback workflow and measurement path. Solid arrows carry the conversation and stopping decision; dashed arrows carry recorded responses to uncertainty measurement. Continued dialogue returns to the Solver. The final Solver answer is graded separately, while the lower path aggregates eight features and queries the frozen SPN. No QA fitting or recalibration takes place.
 
-One way to use the risk scores is to withhold the answers that appear least reliable. Here, coverage means the fraction of answers retained, starting with the lowest predicted risk.
+All 400 conversations terminate with `TASK_DONE`, including all 347 incorrect answers. **381 questions (95.25%) finish after one round**, 14 after two rounds, and five after three. Mean length is **1.06 rounds**, giving **848 observed agent responses**. Completion indicates the Reviewer's stopping decision, rather than verified correctness. The longer conversations are too few and too selected to establish a benefit from additional feedback.
 
-| Answers retained | Number of answers | Accuracy |
-|---|---:|---:|
-| Lowest-risk 10% | 40 | 42.50% |
-| Lowest-risk 25% | 100 | 24.00% |
-| Lowest-risk 50% | 200 | 19.00% |
-| Lowest-risk 75% | 300 | 15.33% |
-| All answers | 400 | 13.25% |
+| Setting | Saved value |
+| --- | --- |
+| Language model | Qwen/Qwen2.5-7B-Instruct |
+| Generation and token scoring | vLLM; scoring backend same |
+| Precision / tensor parallelism | bfloat16 / one shard |
+| Sampling | Temperature 0.7; top-p 1.0; no top-k truncation |
+| Maximum continuation / context | 2,048 / 8,192 tokens |
+| Concurrent problems | 8 |
+| Monte Carlo alternatives | 10 per response, from its frozen context |
+| NLI fallback | tasksource/ModernBERT-large-nli; batch size 32 |
+| NLI limits | 8,000 characters per text; 2,048 tokens per pair |
+| Seed / generator revisions | 42 / model and tokenizer revisions unpinned |
 
-![Accuracy increases as the system retains fewer, lower-risk answers.](assets/accuracy_coverage.png)
+## Step-level confidence and uncertainty measures
 
-*Figure 2. Accuracy improves when higher-risk answers are withheld. Equal scores are handled by averaging over possible orderings within each tied group.*
+This run records Monte Carlo sequence probability (MCSP), likelihood-weighted semantic entropy (SE), token negative log-likelihood (NLL), and generated token length. It does not record full-vocabulary predictive entropy (PE). MCSP is a confidence score: larger means more probable responses. SE and NLL are uncertainty scores: larger means more disagreement or less probable realized tokens. All logarithms are natural and token scores use the raw model distribution.
 
-At 10% coverage, accuracy rises from **13.25% to 42.5%**. That is a meaningful improvement in selection, but it requires withholding answers to 360 questions. Among the 40 retained answers, **57.5% are still wrong**.
+For context c and response y of length L, the implementation defines a length-normalized sequence score q(y) by the geometric mean of token probabilities. This score lies between zero and one, but is not a normalized probability distribution over all possible response strings.
 
-AUARC summarizes retained-answer accuracy across all coverage levels and is **0.2454**. It should not be read as the accuracy when answering every question, which remains 13.25%. The coverage results describe this sample; they do not establish a threshold for future use.
+$$
+q(y\mid c)=\exp\!\left(\frac{1}{L}\sum_{t=1}^{L}\log p_\theta(y_t\mid c,y_{<t})\right),\qquad \mathrm{NLL}(y)=-\frac{1}{L}\sum_{t=1}^{L}\log p_\theta(y_t\mid c,y_{<t}).
+$$
 
-## Predicted risk is far below the actual error rate
+MCSP averages q over the actual response and its ten independently seeded alternatives. It summarizes sampled response confidence, rather than entropy over the next-token vocabulary.
 
-The largest problem is the probability scale. The SPN predicts an average error risk of **44.68%**, while **86.75%** of answers are actually wrong: a gap of **42.07 percentage points**.
+$$
+\mathrm{MCSP}=\frac{1}{11}\sum_{j=0}^{10}q(y^{(j)}\mid c).
+$$
 
-![Calibration plot and distribution of predicted error probabilities.](assets/calibration.png)
+SE clusters these eleven responses by meaning. For two boxed answers, the QA comparison uses normalized text equality or date equivalence for text-like answers, and Math-Verify for other answers. Exactly one boxed answer means different responses; neither boxed answer triggers NLI entailment in either direction. The reference answer is never involved. UQLM's tokenprob entropy weights clusters by response scores rather than by unweighted counts.
 
-*Figure 3. Left: observed error rates are generally well above predicted probabilities. Each point represents an occupied probability bin, with larger markers indicating more questions. Right: predicted risks remain well below the overall observed error rate.*
+$$
+w_k=\sum_{j\in C_k}q(y^{(j)}\mid c),\qquad \pi_k=\frac{w_k}{\sum_\ell w_\ell},\qquad \mathrm{SE}=-\sum_k\pi_k\log\pi_k.
+$$
 
-Correct answers receive an average predicted risk of **35.04%**, compared with **46.15%** for incorrect answers. This difference helps the SPN rank answers, but the estimates are too low to serve as trustworthy probabilities of error.
+UQLM compares responses with existing cluster representatives, and approximate comparisons may permit overlapping memberships; the denominator sums the resulting cluster weights. This is a sample-based estimate, not exact entropy over all possible answers. Eleven responses give at most eleven clusters and an upper bound ln(11), approximately 2.398 nats. Zero SE means observed semantic agreement, which may still be agreement on an incorrect answer.
 
-For example, consider accepting answers whose predicted error risk is below 50%. That would retain 240 answers, of which only **39 are correct: 16.25% accuracy**. A seemingly reassuring score therefore offers little protection against wrong answers in this experiment.
+The completion marker is removed from scored text and rescored on the generating backend when other text remains. A marker-only response retains its generated tokens. Token length corresponds to this scoring view. This avoids treating the routine TASK_DONE string as substantive content when a nonempty response remains, but marker-only decisions can still affect the signals.
 
-The calibration measures tell the same story. Expected calibration error is **0.4207**, Brier score is **0.2904**, and final-label negative log-likelihood is **0.7847**. These values assess the SPN's final error predictions; the last measure is separate from the token-level likelihood used as an input feature.
+## Exactly what enters the SPN
+
+Each problem produces one eight-dimensional vector Z: four aggregates from each agent. MCSP, SE, and token NLL use root mean square (RMS) across that agent's observed responses; token length uses an arithmetic mean. RMS gives high-valued episodes more influence than a mean. For MCSP this emphasizes high-confidence episodes, not high-uncertainty episodes.
+
+$$
+U_{ia}^{(m)}=\sqrt{\frac{1}{T_{ia}}\sum_{s=1}^{T_{ia}}(u_{ias}^{(m)})^2},\qquad \overline L_{ia}=\frac{1}{T_{ia}}\sum_{s=1}^{T_{ia}}L_{ias}.
+$$
+
+| Input | Agent | Measurement | Aggregation |
+| --- | --- | --- | --- |
+| F1 | Solver | MCSP confidence | RMS |
+| F2 | Solver | Semantic entropy | RMS |
+| F3 | Solver | Token NLL | RMS |
+| F4 | Solver | Token length | Mean |
+| F5 | Reviewer | MCSP confidence | RMS |
+| F6 | Reviewer | Semantic entropy | RMS |
+| F7 | Reviewer | Token NLL | RMS |
+| F8 | Reviewer | Token length | Mean |
+
+```text
+Feature order in the saved checkpoint:
+F1: mathematician_mcsp
+F2: mathematician_se
+F3: mathematician_nll
+F4: mathematician_length
+F5: enthusiast_mcsp
+F6: enthusiast_se
+F7: enthusiast_nll
+F8: enthusiast_length
+```
+
+Raw problem text, reference solutions, final-answer correctness, problem identifiers, split labels, round count, and termination reason are not SPN prediction inputs. Y was an additional observed variable during source training only; QA labels are used only for grading and evaluation. The joint training table therefore has nine columns: eight features plus Y. At prediction time, the true label is unknown and the model evaluates both hypothetical label values to calculate error probability.
+
+$$
+U_{\mathrm{SPUMA}}(Z)=P(Y=1\mid Z)=\frac{P(Z,Y=1)}{P(Z,Y=0)+P(Z,Y=1)}.
+$$
+
+This final score expresses the model's estimated risk that the completed answer is wrong. It differs from response-level SE, and from posterior entropy H(Y|Z), which peaks at error probability 0.5. A confidently incorrect answer should have high error risk but can have low posterior entropy.
+
+## Trained joint SPN and why leaves outnumber inputs
+
+The frozen checkpoint is the same network used in the MATH experiment; its SHA-256 matches the saved QA evaluation. LearnSPN learns weighted sums representing mixtures and products representing factorized variable groups. The source-trained checkpoint has 46 sum modules, 72 product modules, 75 histogram leaf modules, and 25 binary label leaf modules: 218 statistical modules and 217 edges. Tensor-concatenation and module-list wrappers are implementation details and are not counted as statistical nodes.
+
+The eight inputs identify variables, while leaves identify local distributions within learned mixture branches. The same variable can have different distributions in many branches, so it appears in several leaf modules. A histogram leaf module can also model multiple variables independently. Thus leaf count is neither the number of inputs nor necessarily the number of scalar distributions. A binary label leaf module internally represents a weighted pair of Y=0/Y=1 indicators; those two conceptual indicators are not counted as two separate exported modules.
+
+For example, a two-component mixture of histograms for one variable has one input but two histogram leaves, one distribution for each component. Learned SPN mixtures repeat this pattern across features and branches. In this checkpoint, the 75 histogram modules contain 101 scalar-variable scope occurrences; the 25 label modules add 25 occurrences of Y. None of these repeated local distributions introduces a new input variable.
+
+| Variable | Leaf-module scope occurrences |
+| --- | --- |
+| F1: mathematician_mcsp | 23 |
+| F2: mathematician_se | 25 |
+| F3: mathematician_nll | 23 |
+| F4: mathematician_length | 13 |
+| F5: enthusiast_mcsp | 7 |
+| F6: enthusiast_se | 1 |
+| F7: enthusiast_nll | 7 |
+| F8: enthusiast_length | 2 |
+| Y: incorrect label | 25 |
+
+These occurrence counts describe topology, not feature importance. Repeated leaves do not create additional observations, additional input columns, or train/test duplication. The 100 leaf modules are the sum of 75 histogram modules and 25 label modules; histogram bins and tails are parameters inside a leaf, not extra leaves.
+
+![Actual learned root factorization, with deeper subtrees collapsed for readability. F1-F8 correspond to the input table. The root product has a label-dependent sum block over F1,F2,F3,F4,F8,Y; a separate sum block over F5,F7; and a histogram factor over F6. The first block has two weighted subtrees with weights read from the checkpoint. The overview collapses deeper branches and does not depict all 218 modules.](assets/trained_spn.svg)
+
+Figure 2. Frozen checkpoint root factorization, with deeper subtrees collapsed for readability. F1-F8 correspond to the input table. The root product has a label-dependent sum block over F1,F2,F3,F4,F8,Y; a separate sum block over F5,F7; and a histogram factor over F6. The first block has two weighted subtrees with weights read from the checkpoint. The overview collapses deeper branches and does not depict all 218 modules.
+
+A consequential structural result is that the Reviewer's MCSP and NLL (F5,F7) form a factor separate from Y, and Reviewer SE (F6) forms another separate factor. Both factors cancel in the posterior ratio P(Y=1|Z). In this fitted network, error-risk predictions therefore depend on the four Solver inputs plus Reviewer mean length (F8), even though all eight features were offered to learning. This is a fitted independence assumption, not proof that the excluded signals cannot improve another model or another SPN structure.
+
+| SPN setting | Value |
+| --- | --- |
+| Structure learner | SPFlow LearnSPN; two-way clustering |
+| Minimum rows / feature slice | 50 / 2 |
+| RDC dependence threshold | 0.3 |
+| Continuous leaf | 10 uniform training-derived bins plus two exponential tails |
+| Histogram / label smoothing | 1.0 / 1.0 |
+| Standardization | Training means and standard deviations only |
+| Label dependence rule | Avoid isolating a varying Y in its own independent product block |
+
+All structure, histogram bins and tails, mixture weights, priors, and standardization parameters remain fixed during QA evaluation. No QA training or validation split is used to update them.
 
 ## Observed uncertainty distributions
 
-The SPN inputs are the per-agent RMS over turns of each measure, as on MATH. The table compares MoreHopQA with the MATH test set the SPN was trained on. The agent ids remain `mathematician` and `enthusiast` because the SPN's features are named after them; on MoreHopQA they play the Solver and Reviewer.
+The Solver has mean RMS semantic entropy **1.572 nats**, with exactly zero SE on **2.8%** of questions. The Reviewer has mean RMS SE **1.231 nats**, with exact zeros on **2.2%**. Mean RMS MCSP is **0.810 versus 0.568**, and mean RMS token NLL is **0.217 versus 0.595**, for Solver versus Reviewer. Mean response length is **157.5 versus 96.8 tokens**. Length uses a mean across turns, while the three uncertainty and confidence measures use RMS.
 
-| Agent | Measure | MATH RMS mean | MoreHopQA RMS mean | MoreHopQA RMS median | MoreHopQA exact zero (%) |
-| --- | --- | ---: | ---: | ---: | ---: |
-| Solver | MCSP | 0.925 | 0.810 | 0.812 | 0.0 |
-| Solver | SE | 0.483 | 1.572 | 1.625 | 2.8 |
-| Solver | NLL | 0.078 | 0.217 | 0.203 | 0.0 |
-| Solver | Length (tokens) | 547.5 | 157.5 | 154.5 | 0.0 |
-| Reviewer | MCSP | 0.636 | 0.568 | 0.563 | 0.0 |
-| Reviewer | SE | 1.586 | 1.231 | 1.274 | 2.2 |
-| Reviewer | NLL | 0.478 | 0.595 | 0.528 | 0.0 |
-| Reviewer | Length (tokens) | 136.8 | 96.8 | 82.5 | 0.0 |
+| Agent | Measure | Aggregate mean | Aggregate median | Exact zero (%) |
+| --- | --- | ---: | ---: | ---: |
+| Solver | MCSP | 0.810 | 0.812 | 0.0 |
+| Solver | SE | 1.572 | 1.625 | 2.8 |
+| Solver | NLL | 0.217 | 0.203 | 0.0 |
+| Solver | Length (tokens) | 157.499 | 154.500 | 0.0 |
+| Reviewer | MCSP | 0.568 | 0.563 | 0.0 |
+| Reviewer | SE | 1.231 | 1.274 | 2.2 |
+| Reviewer | NLL | 0.595 | 0.528 | 0.0 |
+| Reviewer | Length (tokens) | 96.828 | 82.500 | 0.0 |
 
-The Solver is much less certain than the Mathematician was on MATH. Its mean SE triples (0.483 → 1.572 nats), and only 2.8% of questions have zero SE, compared with 56.0% on MATH. Its MCSP drops from 0.925 to 0.810, and its token NLL almost triples. Its responses are about a third as long. The Solver's inputs therefore lie largely outside the range the SPN saw in training, which explains the calibration failure.
+The measures have different units and directions, so their numerical magnitudes are not directly comparable. Roles also differ: varied Reviewer feedback can have high semantic entropy without expressing disagreement over a final answer. Zero SE means that sampled responses agree under the equivalence procedure; agreement can still be wrong.
 
-| Agent | Measure | Correct mean | Incorrect mean | MoreHopQA AUROC | MATH AUROC |
-| --- | --- | ---: | ---: | ---: | ---: |
-| Solver | MCSP | 0.823 | 0.808 | 0.596 | 0.686 |
-| Solver | SE | 0.909 | 1.673 | **0.829** | 0.945 |
-| Solver | NLL | 0.204 | 0.219 | 0.575 | 0.674 |
-| Solver | Length | 163.9 | 156.5 | 0.427 | 0.785 |
-| Reviewer | MCSP | 0.562 | 0.569 | 0.468 | 0.476 |
-| Reviewer | SE | 1.162 | 1.242 | 0.530 | 0.574 |
-| Reviewer | NLL | 0.623 | 0.591 | 0.453 | 0.487 |
-| Reviewer | Length | 103.0 | 95.9 | 0.451 | 0.684 |
+![QA input distributions for correct and incorrect final answers.](assets/feature_distributions.svg)
 
-As in the MATH report, single-feature AUROC uses 1-MCSP and the original SE, NLL and length, so higher means more uncertain; values below 0.5 are kept rather than flipped. Solver SE is the only measure that transfers well. MCSP and NLL keep a weak signal. Response length reverses direction: on MATH, wrong answers were longer, while on MoreHopQA they are slightly shorter. All Reviewer measures are close to chance on both datasets, consistent with the Reviewer approving every answer.
+Figure 3. Distributions of the aggregated signals. Rows show Solver and Reviewer; columns show RMS MCSP, SE, and token NLL. Green solid curves represent 53 correct answers and red dashed curves represent 347 incorrect answers. Each curve is an empirical cumulative distribution function (ECDF), normalized within its outcome group. Solver SE provides the clearest separation.
 
-## Comparison with simpler scores
+| Agent | Measure | Correct mean | Incorrect mean | Raw AUROC |
+| --- | --- | ---: | ---: | ---: |
+| Solver | MCSP | 0.823 | 0.808 | 0.596 |
+| Solver | SE | 0.909 | 1.673 | 0.829 |
+| Solver | NLL | 0.204 | 0.219 | 0.575 |
+| Solver | Length (tokens) | 163.877 | 156.524 | 0.427 |
+| Reviewer | MCSP | 0.562 | 0.569 | 0.468 |
+| Reviewer | SE | 1.162 | 1.242 | 0.530 |
+| Reviewer | NLL | 0.623 | 0.591 | 0.453 |
+| Reviewer | Length (tokens) | 102.972 | 95.889 | 0.451 |
 
-| Ranking score | AUROC (95% CI) | Average precision (95% CI) | AUARC (95% CI) |
-| --- | --- | --- | --- |
-| Joint SPN error probability | 0.6955 [0.6141, 0.7716] | 0.9327 [0.9048, 0.9568] | 0.2454 [0.1767, 0.3078] |
-| SPN posterior entropy | 0.6550 [0.5668, 0.7396] | 0.9164 [0.8802, 0.9466] | 0.2356 [0.1689, 0.2969] |
-| Solver RMS SE alone | **0.8293** [0.7692, 0.8840] | **0.9675** [0.9518, 0.9807] | **0.2907** [0.2218, 0.3567] |
-| Solver RMS MCSP alone (1-MCSP) | 0.5961 [0.5138, 0.6784] | 0.8922 [0.8503, 0.9334] | 0.1831 [0.1307, 0.2446] |
-| Solver RMS NLL alone | 0.5753 [0.4880, 0.6601] | 0.8841 [0.8429, 0.9268] | 0.1754 [0.1230, 0.2305] |
+Single-feature AUROC uses `1−MCSP` for confidence and the original SE, NLL, and length values. Directions follow the measurement definitions and are not flipped after inspecting the test results. Solver SE is the strongest individual ranking signal. The Reviewer measurements are close to chance, while Solver MCSP and NLL carry weaker discrimination. These comparisons do not measure each input's causal contribution to the jointly fitted network; that would require controlled ablations.
 
-Solver SE alone ranks errors better than the joint SPN on every ranking measure; its AUARC closes 59.3% of the random-to-oracle gap, versus 42.3% for the SPN. MCSP and NLL alone are weak: they close only 19.0% and 16.1% of the gap, and the AUROC interval for NLL includes 0.5. On MATH, SE alone was also slightly ahead (AUROC 0.9449 vs 0.9165), but the gap is much larger here. The SPN also relies on length and NLL patterns learned on MATH, which do not hold on MoreHopQA, and these dilute the SE signal. Posterior entropy again ranks worse than the direct error probability. As on MATH, this comparison is exploratory; no paired significance test was run, and unscaled SE is not a probability, so it has no Brier or calibration values.
+![Final-response measurements and aggregated SPN inputs on the QA questions.](assets/completed_trajectories.svg)
 
-## What the findings support
+Figure 4. Final-response scores (top) versus all-turn RMS inputs (bottom). Columns show MCSP, SE, and token NLL. Blue is Solver and orange is Reviewer. All curves use the same 400 questions. The views are similar because 95.25% of questions have only one response from each agent, for which RMS equals the observed score.
 
-The frozen SPN carries some useful error-ranking information into multi-hop QA. It can help prioritize which answers deserve scrutiny, and withholding higher-risk answers improves accuracy on the retained subset. Its probability estimates, however, substantially understate the difficulty of the task. Together with the low answer accuracy, this makes the current system unreliable for automatically accepting QA answers.
+![QA response measurements by conversation round.](assets/round_distributions.svg)
 
-The evidence comes from one model, one QA setup, one sampled test set, and one generation seed. The bootstrap intervals capture uncertainty from resampling those questions; they do not capture variation across new generation runs or model checkpoints. These closed-book results also do not establish performance when supporting evidence is available.
+Figure 5. Per-round response distributions. Rows show MCSP, SE, and token NLL; columns show rounds 1–3. The rounds contain 400, 19, and five questions respectively. Blue is Solver and orange is Reviewer. Within each metric, the horizontal range is shared across rounds. Later rounds are small, selected samples and do not establish that feedback reduces uncertainty.
 
-Grading may reject acceptable aliases that fall outside its matching rules. The incorrect answers have not all been manually audited, so the reported error count should be understood as the outcome of the specified grader. Any recalibration or answer-acceptance policy would need a separate QA validation set and a fresh held-out evaluation.
+An ECDF height of 0.8 means that 80% of the displayed group's scores are at or below that value. Jumps at zero show exact-zero measurements. Missing rounds are not imputed as zero. Responses from the same question are correlated, so evaluation intervals resample whole questions rather than treating all 848 responses as independent test cases.
+
+## Discrimination: detecting incorrect final answers
+
+The positive class is an incorrect final Solver answer. AUROC is the probability that an incorrect answer receives higher risk than a correct answer, with ties counted as one half. Chance ranking has AUROC 0.5. AUPRC is calculated as average precision, rather than trapezoidal precision–recall area.
+
+| Measure | QA test (95% CI) |
+| --- | --- |
+| AUROC | 0.6955 [0.6141, 0.7716] |
+| AUPRC / average precision | 0.9327 [0.9048, 0.9568] |
+| AUARC | 0.2454 [0.1767, 0.3078] |
+| Answer accuracy | 0.1325 [0.1000, 0.1675] |
+
+The SPN's AUROC interval lies above 0.5, supporting useful error discrimination in this sample. Its high average precision needs the class balance for interpretation: **86.75% of answers are incorrect**, so the precision–recall prevalence reference is already **0.8675**. Average precision of 0.9327 is 0.0652 above that reference and does not indicate high answer accuracy.
+
+| Test ranking score | AUROC | Average precision | AUARC |
+| --- | ---: | ---: | ---: |
+| Joint SPN error probability | 0.6955 | 0.9327 | 0.2454 |
+| SPN posterior entropy | 0.6550 | 0.9164 | 0.2356 |
+| Solver RMS SE alone | 0.8293 | 0.9675 | 0.2907 |
+| Solver RMS MCSP alone (1−MCSP) | 0.5961 | 0.8922 | 0.1831 |
+| Solver RMS NLL alone | 0.5753 | 0.8841 | 0.1754 |
+
+Solver semantic entropy requires no error-model fitting and has higher observed AUROC, average precision, and AUARC than the frozen SPN. The present experiment does not establish an advantage for the joint model over this simpler score. The comparison is exploratory; no paired significance test or fresh confirmatory evaluation was performed. Unscaled SE is not a probability and is not used for calibration or Brier-score comparisons.
+
+Intervals use **1,000 percentile bootstrap resamples of question identifiers with 95% confidence**, as stored with the evaluation. They describe uncertainty conditional on this run and sample, rather than variation across independent generation runs, checkpoints, or datasets. No acceptance threshold is tuned on the test set.
+
+![Joint SPN discrimination and the Solver semantic-entropy baseline on QA.](assets/discrimination.svg)
+
+Figure 6. Error detection on 400 QA questions. Left: predicted-risk histograms normalized separately within correct and incorrect answers. Middle: ROC curves, with a chance diagonal. Right: precision versus recall for incorrect answers, with the 0.8675 error-prevalence reference. Orange dash-dot curves show Solver RMS SE. These are descriptive curves calculated from the saved predictions.
+
+SPN posterior entropy ranks errors less well than direct error probability: AUROC **0.6550** versus **0.6955**, and average precision **0.9164** versus **0.9327**. Posterior entropy peaks near predicted error probability 0.5 and can be low for confidently predicted errors. Direct error risk is therefore the primary SPN score in this evaluation.
+
+## Calibration and selective prediction
+
+| QA test measure | Value and 95% bootstrap CI |
+| --- | --- |
+| Brier score | 0.2904 [0.2740, 0.3080] |
+| ECE (15 bins) | 0.4207 [0.3888, 0.4544] |
+| Binary risk NLL | 0.7847 [0.7482, 0.8232] |
+| Area under risk–coverage (AURC) | 0.7546 [0.6922, 0.8233] |
+| Area under accuracy–coverage (AUARC) | 0.2454 [0.1767, 0.3078] |
+
+Brier score averages squared probability errors. ECE summarizes the absolute difference between predicted and observed error frequency in 15 equal-width bins. Binary risk NLL scores the final correctness label and differs from the response-token NLL used as an input feature. Lower values are better for these three measures.
+
+![QA probability calibration and predicted-risk distribution.](assets/calibration.png)
+
+Figure 7. Left: observed error fractions versus mean predicted error probability in occupied bins; marker area reflects bin count. Right: score counts split by correctness, with the mean predicted risk and overall observed error rate marked. Bin-level uncertainty intervals are not shown.
+
+Mean predicted risk is **44.68%**, compared with **86.75%** observed errors. Correct answers receive mean risk **35.04%**, while incorrect answers receive **46.15%**. This separation allows some useful ranking even though the probability scale is too optimistic. At an illustrative threshold of 0.5, the model leaves 240 answers below the threshold, of which only **39 are correct (16.25% accuracy)**. This is a descriptive example, not a validated acceptance policy.
+
+AUARC averages accuracy over the subsets retained by increasing predicted risk. Higher is better. Equal scores use the expected accuracy under a uniformly random ordering within each tied group.
+
+$$
+\operatorname{AUARC}=\frac{1}{n}\sum_{k=1}^{n}\operatorname{Accuracy}(k/n)=1-\operatorname{AURC}.
+$$
+
+| Coverage | Answers retained | Retained-set accuracy |
+| --- | ---: | ---: |
+| 10% | 40 | 42.50% |
+| 25% | 100 | 24.00% |
+| 50% | 200 | 19.00% |
+| 75% | 300 | 15.33% |
+| 100% | 400 | 13.25% |
+
+![Accuracy among retained QA answers versus coverage.](assets/accuracy_coverage.png)
+
+Figure 8. Retaining lower-risk answers improves accuracy over random retention in expectation. At 10% coverage, accuracy reaches 42.5%, but 90% of questions receive no retained answer and 57.5% of the retained answers are still wrong. Individual coverage points have no separate confidence intervals.
+
+The SPN's **AUARC is 0.2454** and **AURC is 0.7546**. These summarize selective accuracy and error across coverage levels, while full-coverage accuracy remains **13.25%**. Selection improves the retained subset; it does not correct any generated answer.
+
+The frozen SPN retains error-ranking information on these QA questions, but its probabilities are not calibrated for this setting, and Solver SE provides better observed ranking. The results are limited to one generator, one QA configuration, one sampled test set, and one frozen checkpoint. Grading errors have not all been manually audited. A reliable acceptance policy would require separate QA validation data, followed by evaluation on fresh held-out questions.
