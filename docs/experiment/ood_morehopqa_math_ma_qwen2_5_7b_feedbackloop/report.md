@@ -81,7 +81,18 @@ This run records Monte Carlo sequence probability (MCSP), likelihood-weighted se
 For context c and response y of length L, the implementation defines a length-normalized sequence score q(y) by the geometric mean of token probabilities. This score lies between zero and one, but is not a normalized probability distribution over all possible response strings.
 
 $$
-q(y\mid c)=\exp\!\left(\frac{1}{L}\sum_{t=1}^{L}\log p_\theta(y_t\mid c,y_{<t})\right),\qquad \mathrm{NLL}(y)=-\frac{1}{L}\sum_{t=1}^{L}\log p_\theta(y_t\mid c,y_{<t}).
+\begin{equation}
+\begin{aligned}
+q_\theta(y \mid c)
+&= \exp\left(
+\frac{1}{L} \sum_{t=1}^{L}
+\log p_\theta(y_t \mid c, y_{<t})
+\right), \\
+\mathrm{NLL}_\theta(y \mid c)
+&= -\frac{1}{L} \sum_{t=1}^{L}
+\log p_\theta(y_t \mid c, y_{<t}).
+\end{aligned}
+\end{equation}
 $$
 
 MCSP averages q over the actual response and its ten independently seeded alternatives. It summarizes sampled response confidence, rather than entropy over the next-token vocabulary.
