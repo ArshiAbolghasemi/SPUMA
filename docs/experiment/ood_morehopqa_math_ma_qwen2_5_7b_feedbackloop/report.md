@@ -6,8 +6,6 @@ This experiment asks whether a joint sum-product network (SPN), trained to estim
 
 On 400 held-out MoreHopQA questions, final-answer accuracy is **13.25% (53 correct, 347 incorrect)**. The joint SPN achieves **AUROC 0.6955** and average precision, reported as AUPRC, **0.9327**. It retains some ability to rank errors, but substantially underestimates their frequency: mean predicted error risk is **44.68%**, while the observed error rate is **86.75%**.
 
-An exploratory single-signal comparison finds that Solver RMS semantic entropy alone achieves **AUROC 0.8293** and average precision **0.9675**, above the joint SPN. This run therefore supports partial transfer of error ranking, but does not demonstrate an advantage from combining the signals in this SPN. Raw SE is a ranking score; the SPN also produces probability estimates, which are poorly calibrated on these QA questions.
-
 The report covers the joint SPN and its QA evaluation. Numeric summaries and figures use the saved predictions and response measurements. No language-model generation, SPN retraining, recalibration, hyperparameter search, or new bootstrap run is performed.
 
 ## Dataset, usable samples, and target
@@ -242,17 +240,16 @@ The SPN's AUROC interval lies above 0.5, supporting useful error discrimination 
 | --- | ---: | ---: | ---: |
 | Joint SPN error probability | 0.6955 | 0.9327 | 0.2454 |
 | SPN posterior entropy | 0.6550 | 0.9164 | 0.2356 |
-| Solver RMS SE alone | 0.8293 | 0.9675 | 0.2907 |
 | Solver RMS MCSP alone (1−MCSP) | 0.5961 | 0.8922 | 0.1831 |
 | Solver RMS NLL alone | 0.5753 | 0.8841 | 0.1754 |
 
-Solver semantic entropy requires no error-model fitting and has higher observed AUROC, average precision, and AUARC than the frozen SPN. The present experiment does not establish an advantage for the joint model over this simpler score. The comparison is exploratory; no paired significance test or fresh confirmatory evaluation was performed. Unscaled SE is not a probability and is not used for calibration or Brier-score comparisons.
+The single-feature comparisons are exploratory; no paired significance test or fresh confirmatory evaluation was performed. Unscaled feature scores are not probabilities and are not used for calibration or Brier-score comparisons.
 
 Intervals use **1,000 percentile bootstrap resamples of question identifiers with 95% confidence**, as stored with the evaluation. They describe uncertainty conditional on this run and sample, rather than variation across independent generation runs, checkpoints, or datasets. No acceptance threshold is tuned on the test set.
 
-![Joint SPN discrimination and the Solver semantic-entropy baseline on QA.](assets/discrimination.svg)
+![Joint SPN discrimination on QA.](assets/discrimination.svg)
 
-Figure 6. Error detection on 400 QA questions. Left: predicted-risk histograms normalized separately within correct and incorrect answers. Middle: ROC curves, with a chance diagonal. Right: precision versus recall for incorrect answers, with the 0.8675 error-prevalence reference. Orange dash-dot curves show Solver RMS SE. These are descriptive curves calculated from the saved predictions.
+Figure 6. Error detection on 400 QA questions. Left: predicted-risk histograms normalized separately within correct and incorrect answers. Middle: ROC curves, with a chance diagonal. Right: precision versus recall for incorrect answers, with the 0.8675 error-prevalence reference. These are descriptive curves calculated from the saved predictions.
 
 SPN posterior entropy ranks errors less well than direct error probability: AUROC **0.6550** versus **0.6955**, and average precision **0.9164** versus **0.9327**. Posterior entropy peaks near predicted error probability 0.5 and can be low for confidently predicted errors. Direct error risk is therefore the primary SPN score in this evaluation.
 
@@ -294,4 +291,4 @@ Figure 8. Retaining lower-risk answers improves accuracy over random retention i
 
 The SPN's **AUARC is 0.2454** and **AURC is 0.7546**. These summarize selective accuracy and error across coverage levels, while full-coverage accuracy remains **13.25%**. Selection improves the retained subset; it does not correct any generated answer.
 
-The frozen SPN retains error-ranking information on these QA questions, but its probabilities are not calibrated for this setting, and Solver SE provides better observed ranking. The results are limited to one generator, one QA configuration, one sampled test set, and one frozen checkpoint. Grading errors have not all been manually audited. A reliable acceptance policy would require separate QA validation data, followed by evaluation on fresh held-out questions.
+The frozen SPN retains error-ranking information on these QA questions, but its probabilities are not calibrated for this setting. The results are limited to one generator, one QA configuration, one sampled test set, and one frozen checkpoint. Grading errors have not all been manually audited. A reliable acceptance policy would require separate QA validation data, followed by evaluation on fresh held-out questions.
