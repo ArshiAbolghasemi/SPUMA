@@ -76,6 +76,21 @@ At 10% coverage, accuracy rises from **13.25% to 42.5%**. That is a meaningful i
 
 AUARC summarizes retained-answer accuracy across all coverage levels and is **0.2454**. It should not be read as the accuracy when answering every question, which remains 13.25%. The coverage results describe this sample; they do not establish a threshold for future use.
 
+### Why AUARC is 0.94 on MATH but 0.25 here
+
+AUARC averages the accuracy of the retained answers over every coverage level, so it is bounded by how many correct answers exist. A random ordering scores about the overall accuracy. A perfect ordering keeps all correct answers first, giving accuracy 1 until they run out and c/k afterwards (c correct answers, k retained):
+
+$$
+\operatorname{AUARC}_{\text{oracle}}=\frac{1}{n}\Big(c+\sum_{k=c+1}^{n}\frac{c}{k}\Big).
+$$
+
+| Dataset | Accuracy | Random AUARC | SPN AUARC | Oracle AUARC | Share of random→oracle gap closed |
+|---|---:|---:|---:|---:|---:|
+| MATH (test, n = 500) | 75.00% | 0.7500 | 0.9413 | 0.9655 | 88.8% |
+| MoreHopQA (n = 400) | 13.25% | 0.1325 | 0.2454 | 0.3992 | 42.3% |
+
+With 53 correct answers out of 400, even a perfect risk model could not exceed **0.399**. Most of the drop from 0.94 to 0.25 therefore comes from the drop in answer accuracy, not from the ranking. The ranking also weakens: the SPN closes 42.3% of the random-to-oracle gap on MoreHopQA versus 88.8% on MATH, consistent with AUROC falling from 0.9165 to 0.6955. Raw AUARC values are not comparable across datasets with different accuracy.
+
 ## Predicted risk is far below the actual error rate
 
 The largest problem is the probability scale. The SPN predicts an average error risk of **44.68%**, while **86.75%** of answers are actually wrong: a gap of **42.07 percentage points**.
@@ -89,6 +104,48 @@ Correct answers receive an average predicted risk of **35.04%**, compared with *
 For example, consider accepting answers whose predicted error risk is below 50%. That would retain 240 answers, of which only **39 are correct: 16.25% accuracy**. A seemingly reassuring score therefore offers little protection against wrong answers in this experiment.
 
 The calibration measures tell the same story. Expected calibration error is **0.4207**, Brier score is **0.2904**, and final-label negative log-likelihood is **0.7847**. These values assess the SPN's final error predictions; the last measure is separate from the token-level likelihood used as an input feature.
+
+## Observed uncertainty distributions
+
+The SPN inputs are the per-agent RMS over turns of each measure, as on MATH. The table compares MoreHopQA with the MATH test set the SPN was trained on. The agent ids remain `mathematician` and `enthusiast` because the SPN's features are named after them; on MoreHopQA they play the Solver and Reviewer.
+
+| Agent | Measure | MATH RMS mean | MoreHopQA RMS mean | MoreHopQA RMS median | MoreHopQA exact zero (%) |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Solver | MCSP | 0.925 | 0.810 | 0.812 | 0.0 |
+| Solver | SE | 0.483 | 1.572 | 1.625 | 2.8 |
+| Solver | NLL | 0.078 | 0.217 | 0.203 | 0.0 |
+| Solver | Length (tokens) | 547.5 | 157.5 | 154.5 | 0.0 |
+| Reviewer | MCSP | 0.636 | 0.568 | 0.563 | 0.0 |
+| Reviewer | SE | 1.586 | 1.231 | 1.274 | 2.2 |
+| Reviewer | NLL | 0.478 | 0.595 | 0.528 | 0.0 |
+| Reviewer | Length (tokens) | 136.8 | 96.8 | 82.5 | 0.0 |
+
+The Solver is much less certain than the Mathematician was on MATH. Its mean SE triples (0.483 → 1.572 nats), and only 2.8% of questions have zero SE, compared with 56.0% on MATH. Its MCSP drops from 0.925 to 0.810, and its token NLL almost triples. Its responses are about a third as long. The Solver's inputs therefore lie largely outside the range the SPN saw in training, which explains the calibration failure.
+
+| Agent | Measure | Correct mean | Incorrect mean | MoreHopQA AUROC | MATH AUROC |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Solver | MCSP | 0.823 | 0.808 | 0.596 | 0.686 |
+| Solver | SE | 0.909 | 1.673 | **0.829** | 0.945 |
+| Solver | NLL | 0.204 | 0.219 | 0.575 | 0.674 |
+| Solver | Length | 163.9 | 156.5 | 0.427 | 0.785 |
+| Reviewer | MCSP | 0.562 | 0.569 | 0.468 | 0.476 |
+| Reviewer | SE | 1.162 | 1.242 | 0.530 | 0.574 |
+| Reviewer | NLL | 0.623 | 0.591 | 0.453 | 0.487 |
+| Reviewer | Length | 103.0 | 95.9 | 0.451 | 0.684 |
+
+As in the MATH report, single-feature AUROC uses 1-MCSP and the original SE, NLL and length, so higher means more uncertain; values below 0.5 are kept rather than flipped. Solver SE is the only measure that transfers well. MCSP and NLL keep a weak signal. Response length reverses direction: on MATH, wrong answers were longer, while on MoreHopQA they are slightly shorter. All Reviewer measures are close to chance on both datasets, consistent with the Reviewer approving every answer.
+
+## Comparison with simpler scores
+
+| Ranking score | AUROC (95% CI) | Average precision (95% CI) | AUARC (95% CI) |
+| --- | --- | --- | --- |
+| Joint SPN error probability | 0.6955 [0.6141, 0.7716] | 0.9327 [0.9048, 0.9568] | 0.2454 [0.1767, 0.3078] |
+| SPN posterior entropy | 0.6550 [0.5668, 0.7396] | 0.9164 [0.8802, 0.9466] | 0.2356 [0.1689, 0.2969] |
+| Solver RMS SE alone | **0.8293** [0.7692, 0.8840] | **0.9675** [0.9518, 0.9807] | **0.2907** [0.2218, 0.3567] |
+| Solver RMS MCSP alone (1-MCSP) | 0.5961 [0.5138, 0.6784] | 0.8922 [0.8503, 0.9334] | 0.1831 [0.1307, 0.2446] |
+| Solver RMS NLL alone | 0.5753 [0.4880, 0.6601] | 0.8841 [0.8429, 0.9268] | 0.1754 [0.1230, 0.2305] |
+
+Solver SE alone ranks errors better than the joint SPN on every ranking measure; its AUARC closes 59.3% of the random-to-oracle gap, versus 42.3% for the SPN. MCSP and NLL alone are weak: they close only 19.0% and 16.1% of the gap, and the AUROC interval for NLL includes 0.5. On MATH, SE alone was also slightly ahead (AUROC 0.9449 vs 0.9165), but the gap is much larger here. The SPN also relies on length and NLL patterns learned on MATH, which do not hold on MoreHopQA, and these dilute the SE signal. Posterior entropy again ranks worse than the direct error probability. As on MATH, this comparison is exploratory; no paired significance test was run, and unscaled SE is not a probability, so it has no Brier or calibration values.
 
 ## What the findings support
 
