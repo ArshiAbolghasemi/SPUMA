@@ -26,6 +26,7 @@ from typing import Any
 import numpy as np
 import yaml
 
+from spuma.chmm.experiment import CHMMAggregation
 from spuma.common.config import to_plain
 from spuma.common.logs import set_run_id, setup_logging
 from spuma.config import SETTINGS_FILE_ENV, get_settings
@@ -145,6 +146,18 @@ class OODEvaluation:
             ],
         }
         result["id_comparison"] = self.compare_with_id(result["models"][c.risk_model], Z, order)
+        chmm = None
+        if settings.chmm.enabled:
+            aggregation = CHMMAggregation(runner)
+            # the source experiment's chmm directory: same settings, so the same fingerprint, next to models/
+            source = c.checkpoint.parent.parent / Path(aggregation.out).name
+            if source.is_dir():
+                chmm = aggregation.evaluate(frozen_from=source)
+                result["chmm"] = {"output": aggregation.out, "frozen_from": str(source)}
+            else:
+                logger.warning(
+                    "no trained CHMM next to the checkpoint; CHMM methods skipped", extra={"path": str(source)}
+                )
         after = sha256(c.checkpoint)
         if after != before:
             raise RuntimeError(f"checkpoint {c.checkpoint} changed during OOD evaluation")
@@ -156,6 +169,8 @@ class OODEvaluation:
             "models": {m: {k: r["value"] for k, r in res.items()} for m, res in result["models"].items()},
             "id_comparison": result["id_comparison"]["metrics"] if result["id_comparison"] else None,
         }
+        if chmm is not None:
+            summary["chmm"] = {m: {k: r["value"] for k, r in res.items()} for m, res in chmm["methods"].items()}
         runner.store.write_json("ood_summary.json", summary)
         logger.info("ood evaluation done", extra={"output": out, "summary": summary})
         return result

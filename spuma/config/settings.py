@@ -24,6 +24,7 @@ from dotenv import load_dotenv
 from dynaconf import Dynaconf
 
 from spuma.agents.config import AgentConfig, AgentsConfig
+from spuma.chmm.config import CHMMConfig
 from spuma.common.config import LoggingConfig, build_config, to_plain
 from spuma.common.utils import stable_hash
 from spuma.dataset.config import DatasetConfig
@@ -56,6 +57,7 @@ class Settings:
     aggregation: AggregationConfig = field(default_factory=AggregationConfig)
     spn: SPNConfig = field(default_factory=SPNConfig)
     evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
+    chmm: CHMMConfig = field(default_factory=CHMMConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
 
     def __post_init__(self) -> None:

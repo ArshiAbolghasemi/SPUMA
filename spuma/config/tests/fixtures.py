@@ -19,6 +19,9 @@ def isolated_env(tmp_path, monkeypatch):
     for var in {*(v for v in os.environ if v.startswith("SPUMA_")), settings_module.SETTINGS_FILE_ENV, "HF_TOKEN"}:
         monkeypatch.setenv(var, "")
         monkeypatch.delenv(var)
+    # offline: the CHMM's QA distance model would be downloaded; tests use the model-free estimator
+    monkeypatch.setenv("SPUMA_CHMM__DISTANCE__ESTIMATOR", "lexical")
+    monkeypatch.setenv("SPUMA_CHMM__BOOTSTRAP_ITERATIONS", "50")
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()

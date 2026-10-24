@@ -21,6 +21,7 @@ the risk models.
           features.json                Z per problem, label Y, parse failure
           models/<name>.pt             risk-model checkpoints (evaluation.risk_models)
           evaluation.json              risk models on validation/test
+          chmm-<fp>/                   CHMM-weighted aggregation methods (`chmm.enabled`, spuma.chmm.experiment)
       summary.json                     test accuracy and risk-model metrics
 
 Fingerprints in directory names (generation: model, agents, seeds, uncertainty settings; features:
@@ -44,6 +45,7 @@ import numpy as np
 
 from spuma.agents.trajectory import Trajectory
 from spuma.agents.workflow import build_workflow
+from spuma.chmm.experiment import CHMMAggregation
 from spuma.common.config import to_plain
 from spuma.common.logs import progress, progress_counter
 from spuma.common.utils import MainThreadCalls, safe_name
@@ -93,7 +95,8 @@ class ExperimentRunner:
 
     def run(self, phases: list[str] | None = None, limit: int | None = None) -> None:
         phases = phases or list(PHASES)
-        plan = validate_backends()
+        # train and evaluate only read saved artifacts: no model engine to validate
+        plan = validate_backends() if {"generate", "score"} & set(phases) else {}
         self.store.write_json("config.json", get_settings().sanitized())
         self.store.write_json(f"runs/{self.run_id}.json", self.metadata(phases, limit, plan))
         if "generate" in phases:
@@ -337,6 +340,8 @@ class ExperimentRunner:
             status = {"status": "trained", "train_rows": len(y), "incorrect": int(y.sum()), **model.summary()}
             self.store.write_json(status_rel, status)
             logger.info("risk model trained", extra={"model": name, **status})
+        if get_settings().chmm.enabled:
+            CHMMAggregation(self).train()
 
     def evaluate(self) -> None:
         """Per risk model: P(Y=1|Z) metrics, posterior-entropy ranking metrics (separately), predictions."""
@@ -385,6 +390,9 @@ class ExperimentRunner:
             "n": test.get("n"),
             "models": {m: {k: r["value"] for k, r in res.items()} for m, res in test.get("models", {}).items()},
         }
+        if get_settings().chmm.enabled:
+            chmm = CHMMAggregation(self).evaluate()
+            summary["chmm"] = {m: {k: r["value"] for k, r in res.items()} for m, res in chmm["methods"].items()}
         self.store.write_json("summary.json", summary)
         logger.info("evaluation", extra={"test": summary})
 

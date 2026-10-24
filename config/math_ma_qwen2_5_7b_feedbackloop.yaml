@@ -180,6 +180,30 @@ evaluation:
     confidence: 0.95
     cluster_by: problem_id
 
+# CHMM (SAUP-inspired) situational weighting of the saved step uncertainties: trained in the train phase,
+# scored in evaluate, next to the risk models (artifacts in <scored>/chmm-<fp>/). Post-generation only.
+chmm:
+  enabled: true
+  alphas: [0.5, 1, 2, 4]     # lambda(alpha) = [1, 1+alpha, 1+2 alpha]; fixed, never fitted to labels
+  primary_alpha: 1
+  distance:
+    estimator: qa            # qa | lexical
+    model: deepset/roberta-base-squad2
+    revision: null
+    max_length: 384
+    stride: 128
+    max_question_tokens: 128
+    max_answer_tokens: 30
+    batch_size: 16
+    device: null             # null: mps, else cuda, else cpu
+  hmm:                       # hmmlearn GaussianHMM
+    n_components: 3
+    covariance_type: diag
+    n_iter: 200
+    random_state: 42
+  bootstrap_iterations: 10000
+  confidence: 0.95
+
 logging:
   level: DEBUG
   format: json
