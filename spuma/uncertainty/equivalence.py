@@ -9,6 +9,9 @@ UQLM's clusterer asks its NLI object, for pairs of texts, whether they mean the 
       normalization or as the same date under dateutil; other answers go to math-verify. Math-verify treats
       letters as commuting symbols ("listen" == "silent"), so short-answer QA keeps text away from it; MATH
       does not, because its text-looking answers (units, `pmatrix`, "0 and 4") are math;
+      MMLU, MuSiQue, MedHopQA: the answer is the last `ANSWER:` / `VERIFIED_ANSWER:` / `SUGGESTED_ANSWER:` line
+      instead of \\boxed{} (`answer_extractor`); MMLU answers are equal as the same option letter, MuSiQue and
+      MedHopQA answers after SQuAD normalization;
   - exactly one does: not equivalent (one commits to an answer, the other does not);
   - neither does (unfinished reasoning, no boxed answer): the wrapped NLI model decides, unchanged.
 Samples are only compared with each other; the reference answer is never involved.
@@ -27,6 +30,7 @@ from math_verify import parse, verify
 from spuma.dataset.base import normalize
 from spuma.dataset.math.answers import extract_boxed
 from spuma.dataset.morehopqa.grading import clean, normalize_answer
+from spuma.dataset.qa import any_answer, letter_equivalent, text_equivalent
 
 logger = logging.getLogger(__name__)
 
@@ -77,11 +81,25 @@ def qa_answers_equivalent(a: str, b: str) -> bool:
     return normalize_answer(a) == normalize_answer(b) or _same_date(a, b)
 
 
-ANSWER_EQUIVALENCE: dict[str, Callable[[str, str], bool]] = {"morehopqa": qa_answers_equivalent}
+ANSWER_EQUIVALENCE: dict[str, Callable[[str, str], bool]] = {
+    "morehopqa": qa_answers_equivalent,
+    "mmlu": letter_equivalent,
+    "musique": text_equivalent,
+    "medhopqa": text_equivalent,
+}
+ANSWER_EXTRACTORS: dict[str, Callable[[str], str | None]] = {
+    "mmlu": any_answer,
+    "musique": any_answer,
+    "medhopqa": any_answer,
+}
 
 
 def answer_equivalence(dataset: str) -> Callable[[str, str], bool]:
     return ANSWER_EQUIVALENCE.get(dataset, answers_equivalent)
+
+
+def answer_extractor(dataset: str) -> Callable[[str], str | None]:
+    return ANSWER_EXTRACTORS.get(dataset, boxed_answer)
 
 
 def _result(same: bool) -> dict[str, Any]:
@@ -96,10 +114,14 @@ class AnswerAwareNLI:
     """
 
     def __init__(
-        self, nli_factory: Callable[[], Any], equivalent: Callable[[str, str], bool] = answers_equivalent
+        self,
+        nli_factory: Callable[[], Any],
+        equivalent: Callable[[str, str], bool] = answers_equivalent,
+        extract: Callable[[str], str | None] = boxed_answer,
     ) -> None:
         self._factory = nli_factory
         self._equivalent = equivalent
+        self._extract = extract
         self._nli: Any = None
         self.num_responses: int | None = None
         self.counts = {"math_verify": 0, "answer_vs_none": 0, "nli": 0}
@@ -115,7 +137,7 @@ class AnswerAwareNLI:
         out: list[dict[str, Any] | None] = [None] * len(response_pairs)
         pending: list[int] = []
         for i, (a, b) in enumerate(response_pairs):
-            ans_a, ans_b = boxed_answer(a), boxed_answer(b)
+            ans_a, ans_b = self._extract(a), self._extract(b)
             if ans_a is not None and ans_b is not None:
                 out[i] = _result(self._equivalent(ans_a, ans_b))
                 self.counts["math_verify"] += 1

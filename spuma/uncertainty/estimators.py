@@ -38,7 +38,7 @@ from spuma.config import get_settings
 from spuma.models.backend import GenerationRequest, ModelBackend, require
 from spuma.models.config import GenerationConfig
 from spuma.uncertainty.config import MonteCarloConfig, SemanticEntropyConfig
-from spuma.uncertainty.equivalence import AnswerAwareNLI, answer_equivalence
+from spuma.uncertainty.equivalence import AnswerAwareNLI, answer_equivalence, answer_extractor
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +122,8 @@ def load_uqlm_semantic_entropy() -> Any:
     `nli`: the NLI model for every pair.
     """
     if _se().equivalence == "answer_aware":
-        nli = AnswerAwareNLI(load_nli, answer_equivalence(get_settings().dataset.name))
+        dataset = get_settings().dataset.name
+        nli = AnswerAwareNLI(load_nli, answer_equivalence(dataset), answer_extractor(dataset))
     else:
         nli = load_nli()
     return UQLMSemanticEntropy(

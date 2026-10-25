@@ -107,9 +107,10 @@ class Settings:
     def generation_fingerprint(self) -> str:
         """Cache key of the generate phase: conversations and their per-step uncertainty (measured inline)."""
         data = {k: v for k, v in self.to_dict().items() if k in ("project", "agents", "uncertainty")}
-        # agents without `templates` hash as before the field existed (existing artifact directories stay valid)
+        # agents without `templates` / `prompt` hash as before those fields existed (existing artifact directories
+        # stay valid); a composed prompt is hashed through its text, in system_prompt
         data["agents"]["items"] = [
-            {k: v for k, v in a.items() if k != "templates" or v} for a in data["agents"]["items"]
+            {k: v for k, v in a.items() if k not in ("templates", "prompt") or v} for a in data["agents"]["items"]
         ]
         data["models"] = {k: m.generation_fingerprint() for k, m in self.all_models().items()}
         return stable_hash(data)

@@ -150,7 +150,7 @@ def test_unknown_and_missing_keys_name_the_path(raw_config):
         Settings.from_dict(raw_config)
     del raw_config["dataset"]["imaeg"]
     del raw_config["agents"]["items"][0]["system_prompt"]
-    with pytest.raises(ValueError, match=r"agents\.items\.0\.system_prompt"):
+    with pytest.raises(ValueError, match=r"agents\.items\[mathematician\]: system_prompt or prompt"):
         Settings.from_dict(raw_config)
 
 

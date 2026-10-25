@@ -56,6 +56,9 @@ class CHMMConfig:
     hmm: HMMConfig = field(default_factory=HMMConfig)
     bootstrap_iterations: int = 10000
     confidence: float = 0.95
+    # registered experiments (same architecture, e.g. the MATH one) whose trained CHMM, calibrators and SPNs are
+    # also evaluated here, frozen: nothing is fitted on this dataset's labels (frozen OOD protocol)
+    frozen_from: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "alphas", [float(a) for a in self.alphas])

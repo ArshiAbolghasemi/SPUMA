@@ -46,7 +46,7 @@ from spuma.chmm.hmm import STATE_NAMES, SituationalHMM, state_coefficients, step
 from spuma.common.config import to_plain
 from spuma.common.logs import progress
 from spuma.common.utils import safe_name, stable_hash
-from spuma.config import get_settings
+from spuma.config import PROJECT_ROOT, get_settings
 from spuma.dataset.math.answers import extract_boxed
 from spuma.evaluation.metrics import METRICS, expected_calibration_error
 from spuma.spn.model import JointSPN
@@ -98,13 +98,34 @@ def chronological_steps(trajectory: Trajectory) -> list[dict[str, Any]]:
     return out
 
 
-class CHMMAggregation:
-    """The CHMM experiment of one `ExperimentRunner` (its store, generation and scored directories)."""
+def chmm_fingerprint(config: Any) -> str:
+    """Cache key of the CHMM directory; `frozen_from` only adds evaluations, so it is not part of it."""
+    return stable_hash({k: v for k, v in to_plain(config).items() if k != "frozen_from"})
 
-    def __init__(self, runner: Any) -> None:
+
+def trained_dir(experiment_name: str) -> tuple[Path, Any]:
+    """(trained CHMM directory, `chmm:` settings) of a registered experiment, from its own settings file (not the
+    active one)."""
+    from spuma.config.settings import load_settings  # noqa: PLC0415 - avoids an import cycle with the runner
+    from spuma.experiments.registry import EXPERIMENTS  # noqa: PLC0415
+
+    if experiment_name not in EXPERIMENTS:
+        raise ValueError(f"chmm.frozen_from: {experiment_name!r} is not a registered experiment")
+    s = load_settings([EXPERIMENTS[experiment_name].config_file])
+    scored = f"generation-{s.generation_fingerprint()}/scored-{s.scoring_fingerprint()}"
+    root = s.experiment.output_dir if s.experiment.output_dir.is_absolute() else PROJECT_ROOT / s.experiment.output_dir
+    return root / s.experiment.name / scored / f"chmm-{chmm_fingerprint(s.chmm)}", s.chmm
+
+
+class CHMMAggregation:
+    """The CHMM experiment of one `ExperimentRunner` (its store, generation and scored directories). `out`
+    overrides the output directory (frozen evaluations go below the experiment's own)."""
+
+    def __init__(self, runner: Any, out: str | None = None) -> None:
         self.runner, self.store = runner, runner.store
         self.config = get_settings().chmm
-        self.out = f"{runner.scored_dir()}/chmm-{stable_hash(to_plain(self.config))}"
+        self.out = out or f"{runner.scored_dir()}/chmm-{chmm_fingerprint(self.config)}"
+        self._cache: list[dict[str, Any]] | None = None
 
     @property
     def spn_methods(self) -> list[str]:
@@ -117,7 +138,10 @@ class CHMMAggregation:
         """Fit the CHMM, one SPN per SPN method and the standalone calibrators, on the training split only."""
         problems = [p for p in self._problems() if p["split"] == "train"]
         if not problems:
-            raise RuntimeError("chmm: no training problems")
+            reason = "no labeled training problems: the CHMM, SPNs and calibrators cannot be fitted on this dataset"
+            logger.warning("chmm training skipped", extra={"reason": reason, "frozen_from": self.config.frozen_from})
+            self.store.write_json(f"{self.out}/status.json", {"status": "skipped", "reason": reason})
+            return
         hmm = SituationalHMM(self.config.hmm).fit([p["x"] for p in problems])
         hmm.save(self.store.path(f"{self.out}/models/chmm.pkl"))
         described = {**hmm.describe(), "lambdas": self.lambdas(), "train_problems": len(problems)}
@@ -159,7 +183,7 @@ class CHMMAggregation:
         checks = self._checks(problems, hmm, trained["lambdas"])
         idx = np.array([p["split"] == "test" for p in problems])
         if not idx.any():
-            raise RuntimeError("chmm: no test problems")
+            raise RuntimeError("chmm: no labeled test problems")
         Z = {m: self._aggregate(problems, m) for m in self.spn_methods}
         standalone = {m: np.array([self._standalone(p, m) for p in problems]) for m in STANDALONE}
         y = np.array([p["label"] for p in problems])[idx]
@@ -189,12 +213,47 @@ class CHMMAggregation:
         logger.info("chmm evaluation", extra={"output": self.out, "n_test": len(y)})
         return evaluation
 
+    def evaluate_all(self) -> dict[str, Any]:
+        """{"dataset_specific": evaluation or None, "frozen": {source experiment: evaluation}}.
+
+        Dataset-specific: the models `train` fitted on this dataset (skipped, with a diagnostic, when it had no
+        labeled training data). Frozen: for each `chmm.frozen_from` experiment, its trained models evaluated here
+        unchanged, in `<chmm dir>/frozen-<source>/`; nothing is fitted on this dataset's labels."""
+        out: dict[str, Any] = {"dataset_specific": None, "frozen": {}}
+        if (self.store.path(self.out) / "models" / "chmm.pkl").is_file():
+            out["dataset_specific"] = self.evaluate()
+        else:
+            logger.warning(
+                "no dataset-specific CHMM models (no labeled training data, or train not run): only frozen evaluations",
+                extra={"output": self.out},
+            )
+        for source in self.config.frozen_from:
+            src, source_config = trained_dir(source)
+            if not (src / "models" / "chmm.pkl").is_file():
+                logger.warning("frozen source not trained yet; skipped", extra={"source": source, "path": str(src)})
+                continue
+            if source_config.distance != self.config.distance or source_config.alphas != self.config.alphas:
+                raise ValueError(f"chmm.frozen_from {source}: its distance estimator or alphas differ from these")
+            frozen = CHMMAggregation(self.runner, out=f"{self.out}/frozen-{source}")
+            frozen._cache = self._problems()
+            out["frozen"][source] = frozen.evaluate(frozen_from=src)
+        return out
+
     # -- data ------------------------------------------------------------------------------------------------
 
     def _problems(self) -> list[dict[str, Any]]:
-        """Every scored problem (features.json order) with its chronological steps and distances."""
+        """Every labeled scored problem (features.json order) with its chronological steps and distances; unlabeled
+        problems (no reference answer) are left out and counted."""
+        if self._cache is not None:
+            return self._cache
         runner = self.runner
         rows = self.store.read_json(f"{runner.scored_dir()}/features.json")
+        unlabeled = sum(r["label"] is None for r in rows)
+        if unlabeled:
+            logger.info(
+                "chmm: unlabeled problems left out", extra={"unlabeled": unlabeled, "labeled": len(rows) - unlabeled}
+            )
+        rows = [r for r in rows if r["label"] is not None]
         problems = []
         for r in progress(rows, total=len(rows), desc="chmm load"):
             rel = f"{runner.generation_dir()}/trajectories/{safe_name(r['problem_id'])}.json"
@@ -209,6 +268,7 @@ class CHMMAggregation:
                 }
             )
         self._distances(problems)
+        self._cache = problems
         return problems
 
     def _distances(self, problems: list[dict[str, Any]]) -> None:
@@ -601,3 +661,20 @@ def _table_rows(evaluation: dict[str, Any], dataset: str, arch: str, config: Any
 
 def _platt(coef: list[float], s: np.ndarray) -> np.ndarray:
     return 1 / (1 + np.exp(-(coef[0] * s + coef[1])))
+
+
+def consolidate(names: list[str]) -> list[dict[str, Any]]:
+    """Every evaluated CHMM-study row of the named experiments: `protocol` is `dataset_specific` (models fitted on
+    that dataset's training split) or `frozen:<source experiment>` (another experiment's models, unchanged)."""
+    rows = []
+    for name in names:
+        directory, _ = trained_dir(name)
+        tables = [("dataset_specific", directory / "results_table.json")]
+        tables += [
+            (f"frozen:{d.name.removeprefix('frozen-')}", d / "results_table.json")
+            for d in sorted(directory.glob("frozen-*"))
+        ]
+        for protocol, path in tables:
+            if path.is_file():
+                rows += [{"experiment": name, "protocol": protocol, **r} for r in json.loads(path.read_text())]
+    return rows

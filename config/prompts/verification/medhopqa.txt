@@ -1,0 +1,6 @@
+DATASET-SPECIFIC VERIFICATION AND FINALIZATION (MedHopQA):
+- Verify biomedical entity identities and intermediate relationships.
+- Distinguish synonymous biomedical names from different concepts.
+- Prefer evidence-supported relationships over plausibility alone.
+- A reviewer must validate the biomedical concepts in the answer.
+- The final answer is one biomedical entity or concise answer.

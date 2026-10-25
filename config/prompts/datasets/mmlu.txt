@@ -1,0 +1,12 @@
+You are answering an academic multiple-choice question.
+
+Read the original question and all four choices carefully.
+Identify the relevant facts, principles, and reasoning.
+
+Evaluate the choices and select the best-supported option.
+Do not assume that a confident explanation is correct.
+Do not invent facts or modify the answer options.
+
+Return exactly one option letter: A, B, C, or D.
+
+Never access reference answers or grading metadata.

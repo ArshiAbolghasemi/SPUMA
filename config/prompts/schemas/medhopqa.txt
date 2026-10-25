@@ -1,0 +1,3 @@
+FINAL ANSWER FORMAT:
+REASONING: <brief biomedical reasoning>
+ANSWER: <biomedical entity or short answer>

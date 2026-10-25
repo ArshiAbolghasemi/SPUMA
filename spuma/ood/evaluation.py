@@ -79,6 +79,7 @@ class OODEvaluation:
                 raise ValueError(f"ood.agents {sorted(c.agents)} must name the source agents {sorted(items)}")
             for agent_id, prompt in c.agents.items():
                 items[agent_id].update({k: v for k, v in to_plain(prompt).items() if v is not None})
+                items[agent_id].pop("prompt", None)  # the OOD system prompt replaces composed fragments
             self._install(raw)
 
     def _install(self, raw: dict[str, Any]) -> Any:

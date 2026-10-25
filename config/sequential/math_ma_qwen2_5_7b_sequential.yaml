@@ -52,9 +52,11 @@ models: {}
 # finalizer's response is graded. The Star roles without the coordinator: the Analyst and Verifier prompts are
 # Star's, the Finalizer's are Star's final-synthesis rules. Each agent gets its system prompt and one user
 # message: user_template with {problem} and {previous} (the earlier agents' responses, in order, joined by a
-# blank line). str.format templates: write a literal brace as {{ }}. TASK_DONE and max_rounds are not used.
+# blank line) and {<agent id>} (that agent's response). str.format templates: write a literal brace as {{ }}.
+# Only the finalizer ends with TASK_DONE (stripped before scoring); max_rounds is not used.
 agents:
   workflow: sequential
+  completion_token: TASK_DONE
   items:
     - id: analyst
       model: default
@@ -151,6 +153,7 @@ agents:
         Do not simulate other agents.
         Do not request additional iterations.
         Do not access reference answers or grading labels.
+        End your response with TASK_DONE.
       user_template: "Original mathematical problem:\n{problem}\n\nAnalyst's solution, then the Verifier's assessment:\n\n{previous}\n\nGive the final answer."
 
 dataset:

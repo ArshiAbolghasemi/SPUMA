@@ -137,15 +137,21 @@ def test_graph_never_sees_reference(config, scripted_backend_cls):
     assert not any("reference" in p.lower() or "ground truth" in p.lower() for p in backend.prompts)
 
 
-def test_sequential_workflow_one_measured_response_per_agent(config, set_settings, scripted_backend_cls):
-    _with_agents(config, set_settings, workflow="sequential")
+def test_sequential_workflow_one_measured_response_per_agent(monkeypatch, scripted_backend_cls):
+    _sequential_settings(monkeypatch)
     uq = RecordingUQ()
-    workflow = build_workflow(_shared(scripted_backend_cls([A1, B1])), uq)
+    workflow = build_workflow(_shared(scripted_backend_cls([A1, B1, A3 + "\nTASK_DONE"])), uq)
     assert isinstance(workflow, MultiAgentWorkflow)
     traj = workflow.run("p1", "Solve 2x + 3 = 7.")
-    assert [len(a.steps) for a in traj.agents] == [1, 1] and traj.final_answer_text == B1
-    assert traj.termination_reason == "completed" and [c[2] for c in uq.calls] == [None, None]
+    assert [len(a.steps) for a in traj.agents] == [1, 1, 1] and traj.final_answer_text.startswith(A3)
+    assert traj.termination_reason == "task_done" and [c[2] for c in uq.calls] == ["TASK_DONE"] * 3
     assert A1 in traj.agents[1].steps[0].input_messages[1]["content"]
+
+
+def test_sequential_workflow_needs_three_agents(raw_config):
+    raw_config["agents"]["workflow"] = "sequential"
+    with pytest.raises(ValueError, match="exactly 3"):
+        Settings.from_dict(raw_config)
 
 
 def test_feedback_workflow_needs_two_agents(raw_config):
@@ -154,17 +160,34 @@ def test_feedback_workflow_needs_two_agents(raw_config):
         Settings.from_dict(raw_config)
 
 
-def test_sequential_experiment_runs_analyst_verifier_finalizer_once_each(monkeypatch, scripted_backend_cls):
+def _sequential_settings(monkeypatch):
     from spuma.config import PROJECT_ROOT, SETTINGS_FILE_ENV, get_settings  # noqa: PLC0415
 
     path = PROJECT_ROOT / "config" / "sequential" / "math_ma_qwen2_5_7b_sequential.yaml"
     monkeypatch.setenv(SETTINGS_FILE_ENV, str(path))
     get_settings.cache_clear()
-    backend = scripted_backend_cls([A1, "VERDICT: CORRECT\nVERIFIED_ANSWER: \\boxed{2}", A3])
+
+
+def test_sequential_experiment_runs_analyst_verifier_finalizer_once_each(monkeypatch, scripted_backend_cls):
+    _sequential_settings(monkeypatch)
+    final = A3 + "\nTASK_DONE"
+    backend = scripted_backend_cls([A1, "VERDICT: CORRECT\nVERIFIED_ANSWER: \\boxed{2}", final])
     traj = build_workflow(lambda _id: backend).run("p1", "Solve 2x + 3 = 7.")
     assert [m["agent_id"] for m in traj.messages] == ["analyst", "verifier", "finalizer"]
-    assert len(backend.calls) == 3 and traj.final_answer_text == A3 and traj.termination_reason == "completed"
+    assert len(backend.calls) == 3 and traj.final_answer_text == final and traj.termination_reason == "task_done"
+    assert traj.metadata == {"workflow": "sequential", "llm_calls": 3, "early_completion_token": []}
     analyst, verifier, finalizer = (a.steps[0].input_messages for a in traj.agents)
     assert "You are the Analyst" in analyst[0]["content"] and len(analyst) == len(verifier) == len(finalizer) == 2
     assert A1 in verifier[1]["content"] and "Solve 2x + 3 = 7." in verifier[1]["content"]
     assert A1 in finalizer[1]["content"] and "VERDICT: CORRECT" in finalizer[1]["content"]
+    assert "TASK_DONE" in finalizer[0]["content"] and "TASK_DONE" not in analyst[0]["content"].replace(
+        "Do not output TASK_DONE", ""
+    )
+
+
+def test_sequential_without_completion_token_still_ends_after_the_finalizer(monkeypatch, scripted_backend_cls):
+    _sequential_settings(monkeypatch)
+    backend = scripted_backend_cls([A1 + " TASK_DONE", B1, A3])
+    traj = build_workflow(lambda _id: backend).run("p1", "q")
+    assert len(backend.calls) == 3 and traj.termination_reason == "no_completion_token"
+    assert traj.metadata["early_completion_token"] == ["analyst"]

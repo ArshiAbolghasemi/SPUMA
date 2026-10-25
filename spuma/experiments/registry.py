@@ -1,8 +1,29 @@
-"""Registered experiments, by name. A new experiment adds a module with an `EXPERIMENT` and one entry here."""
+"""Registered experiments, by name: every (dataset, architecture) pair, each with its settings file
+`config/<architecture>/<dataset>_ma_qwen2_5_7b_<architecture>.yaml`. A new dataset or architecture adds its
+settings files and one entry here; an experiment that needs code of its own subclasses `Experiment`.
 
-from spuma.experiments import math, math_sequential, math_star
+MATH comes first: its trained models are the frozen sources (`chmm.frozen_from`) of the other datasets.
+"""
+
+from spuma.config import PROJECT_ROOT
 from spuma.experiments.base import Experiment
 
+ARCHITECTURES = ("feedbackloop", "star", "sequential")
+DATASETS = {
+    "math": "MATH competition mathematics",
+    "mmlu": "MMLU four-choice academic questions",
+    "musique": "MuSiQue-Ans evidence-grounded multi-hop QA",
+    "medhopqa": "MedHopQA biomedical multi-hop QA (labeled development set; frozen MATH-trained models)",
+}
+
 EXPERIMENTS: dict[str, Experiment] = {
-    e.name: e for e in (math.EXPERIMENT, math_star.EXPERIMENT, math_sequential.EXPERIMENT)
+    f"{dataset}_ma_qwen2_5_7b_{architecture}": Experiment(
+        name=f"{dataset}_ma_qwen2_5_7b_{architecture}",
+        config_file=PROJECT_ROOT / "config" / architecture / f"{dataset}_ma_qwen2_5_7b_{architecture}.yaml",
+        description=f"{description}, Qwen2.5-7B-Instruct {architecture}",
+        architecture=architecture,
+        dataset=dataset,
+    )
+    for dataset, description in DATASETS.items()
+    for architecture in ARCHITECTURES
 }

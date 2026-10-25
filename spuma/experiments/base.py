@@ -24,6 +24,8 @@ class Experiment:
     name: str
     config_file: Path
     description: str = ""
+    architecture: str = ""  # feedbackloop | star | sequential
+    dataset: str = ""
 
     def activate(self) -> Settings:
         """Make this experiment's settings file the process-wide settings (`get_settings()`)."""

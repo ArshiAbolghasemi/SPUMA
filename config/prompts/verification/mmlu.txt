@@ -1,0 +1,6 @@
+DATASET-SPECIFIC VERIFICATION AND FINALIZATION (MMLU):
+- Independently evaluate all four options.
+- Explain why the selected option is better supported.
+- A reviewer must validate the option choice.
+- A verified answer is one candidate option letter: A, B, C, or D.
+- The final answer is exactly one option letter.

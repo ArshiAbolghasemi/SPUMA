@@ -50,7 +50,7 @@ from spuma.common.config import to_plain
 from spuma.common.logs import progress, progress_counter
 from spuma.common.utils import MainThreadCalls, safe_name
 from spuma.config import PROJECT_ROOT, get_settings
-from spuma.dataset.base import AnswerGrader, DatasetProvider, Problem
+from spuma.dataset.base import AnswerGrader, DatasetProvider, Grade, Problem
 from spuma.dataset.registry import get_dataset, get_grader
 from spuma.evaluation.metrics import binary_entropy, evaluate
 from spuma.evaluation.risk import risk_model_spec
@@ -258,7 +258,12 @@ class ExperimentRunner:
 
     def _save(self, split: str, i: int, problem: Problem, trajectory: Trajectory) -> None:
         failed = trajectory.termination_reason == "error"
-        grade = None if failed else self.grader.grade(problem, trajectory.final_answer_text).to_dict()
+        if failed:
+            grade = None
+        elif problem.reference_solution is None:  # unlabeled (blind-test) question: never right or wrong
+            grade = Grade(problem.problem_id, None, None, None, None, False, False, "unlabeled").to_dict()
+        else:
+            grade = self.grader.grade(problem, trajectory.final_answer_text).to_dict()
         record = {
             "split": split,
             "trajectory": trajectory.model_dump(),
@@ -317,8 +322,12 @@ class ExperimentRunner:
         logger.info("scored", extra={"problems": len(rows), "skipped": len(skipped)})
 
     def _matrix(self, split: str) -> tuple[np.ndarray, np.ndarray, list[dict[str, Any]]]:
-        """One row per problem of `split`."""
+        """One row per labeled problem of `split` (unlabeled problems, without a reference answer, are left out)."""
         rows = [r for r in self.store.read_json(f"{self.scored_dir()}/features.json") if r["split"] == split]
+        unlabeled = sum(r["label"] is None for r in rows)
+        if unlabeled:
+            logger.info("unlabeled problems left out", extra={"split": split, "unlabeled": unlabeled})
+        rows = [r for r in rows if r["label"] is not None]
         order = get_settings().features.order
         Z = np.array([[r["features"][f] for f in order] for r in rows], dtype=float).reshape(len(rows), len(order))
         return Z, np.array([r["label"] for r in rows], dtype=int), rows
@@ -330,6 +339,11 @@ class ExperimentRunner:
         Z, y, _ = self._matrix("train")
         for name in get_settings().evaluation.risk_models:
             status_rel = f"{self.scored_dir()}/models/{name}_status.json"
+            if not len(y):
+                reason = "no labeled training problems: supervised training is not possible on this dataset"
+                logger.warning("risk model training skipped", extra={"model": name, "reason": reason})
+                self.store.write_json(status_rel, {"status": "skipped", "reason": reason})
+                continue
             try:
                 model = risk_model_spec(name).build().fit(Z, y)
             except ValueError as e:
@@ -391,10 +405,18 @@ class ExperimentRunner:
             "models": {m: {k: r["value"] for k, r in res.items()} for m, res in test.get("models", {}).items()},
         }
         if get_settings().chmm.enabled:
-            chmm = CHMMAggregation(self).evaluate()
-            summary["chmm"] = {m: {k: r["value"] for k, r in res.items()} for m, res in chmm["methods"].items()}
+            chmm = CHMMAggregation(self).evaluate_all()
+            if chmm["dataset_specific"]:
+                summary["chmm"] = _values(chmm["dataset_specific"])
+            if chmm["frozen"]:
+                summary["chmm_frozen"] = {source: _values(ev) for source, ev in chmm["frozen"].items()}
         self.store.write_json("summary.json", summary)
         logger.info("evaluation", extra={"test": summary})
+
+
+def _values(evaluation: dict[str, Any]) -> dict[str, dict[str, float]]:
+    """{method: {metric: value}} of a CHMM evaluation."""
+    return {m: {k: r["value"] for k, r in res.items()} for m, res in evaluation["methods"].items()}
 
 
 def _version(package: str) -> str | None:

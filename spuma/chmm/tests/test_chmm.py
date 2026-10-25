@@ -10,6 +10,7 @@ from spuma.chmm.distances import LexicalDistance, preceding, situational_distanc
 from spuma.chmm.experiment import STANDALONE, CHMMAggregation, chmm_method
 from spuma.chmm.hmm import SituationalHMM, state_coefficients, step_weights
 from spuma.config import SETTINGS_FILE_ENV, get_settings
+from spuma.dataset.base import Problem
 from spuma.experiments.runner import ExperimentRunner
 from spuma.experiments.tests.test_e2e import Engines, FakeDataset, fake_capabilities  # noqa: F401
 
@@ -121,3 +122,62 @@ def test_chmm_runs_in_the_experiment_and_evaluates_frozen(experiment):
     again = aggregation.evaluate(frozen_from=out)
     assert {p.name: p.read_bytes() for p in (out / "models").iterdir()} == before
     assert again["methods"] == ev["methods"]
+
+
+class EvalOnlyDataset:
+    """No training data; test questions the fake model answers, two of them unlabeled (blind)."""
+
+    def load(self):
+        test = [
+            Problem(
+                f"eval/test/{k}",
+                f"What is {k % 9 + 2}+{k // 3 + 5}?",
+                None if k < 2 else f"\\boxed{{{k % 9 + 2 + k // 3 + 5}}}",
+                "test",
+            )
+            for k in range(30)
+        ]
+        return {"train": [], "validation": [], "test": test}
+
+
+def test_eval_only_dataset_skips_training_and_evaluates_the_frozen_source(experiment, tmp_path, monkeypatch):
+    from spuma.experiments import registry  # noqa: PLC0415
+    from spuma.experiments.base import Experiment  # noqa: PLC0415
+
+    source_runner = experiment
+    source_file = tmp_path / "source.yaml"
+    monkeypatch.setattr(registry, "EXPERIMENTS", {"src": Experiment("src", source_file)})
+    source_dir = source_runner.store.path(CHMMAggregation(source_runner).out)
+    before = {p.name: p.read_bytes() for p in (source_dir / "models").iterdir()}
+
+    raw = yaml.safe_load(source_file.read_text())
+    raw["experiment"]["name"] = "target"
+    raw["dataset"].update({"train_samples": 0, "validation_samples": 0, "test_samples": 30})
+    raw["chmm"]["frozen_from"] = ["src"]
+    target_file = tmp_path / "target.yaml"
+    target_file.write_text(yaml.safe_dump(raw))
+    os.environ[SETTINGS_FILE_ENV] = str(target_file)
+    get_settings.cache_clear()
+    engines = Engines()
+    runner = ExperimentRunner(EvalOnlyDataset(), engines.factory, release=engines.release)
+    runner.run()
+
+    d = runner.scored_dir()
+    labels = [r["label"] for r in runner.store.read_json(f"{d}/features.json")]
+    assert labels.count(None) == 2
+    assert runner.store.read_json(f"{d}/models/spn_status.json")["status"] == "skipped"
+    aggregation = CHMMAggregation(runner)
+    assert runner.store.read_json(f"{aggregation.out}/status.json")["status"] == "skipped"
+    summary = runner.store.read_json("summary.json")
+    assert "chmm" not in summary and list(summary["chmm_frozen"]) == ["src"]
+    frozen = runner.store.read_json(f"{aggregation.out}/frozen-src/evaluation.json")
+    assert frozen["n_test"] == 28 and frozen["frozen_from"] == str(source_dir)
+    assert set(frozen["methods"]) == {*STANDALONE, "rms_spn", *(chmm_method(a) for a in get_settings().chmm.alphas)}
+    assert {p.name: p.read_bytes() for p in (source_dir / "models").iterdir()} == before
+
+    from spuma.chmm.experiment import consolidate  # noqa: PLC0415
+
+    registry.EXPERIMENTS["target"] = Experiment("target", target_file)
+    rows = consolidate(["src", "target"])
+    assert {(r["experiment"], r["protocol"]) for r in rows} == {("src", "dataset_specific"), ("target", "frozen:src")}
+    assert len(rows) == 18
