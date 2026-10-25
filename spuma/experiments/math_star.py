@@ -10,6 +10,6 @@ from spuma.experiments.base import Experiment
 
 EXPERIMENT = Experiment(
     name="math_ma_qwen2_5_7b_star",
-    config_file=PROJECT_ROOT / "config" / "math_ma_qwen2_5_7b_star.yaml",
+    config_file=PROJECT_ROOT / "config" / "star" / "math_ma_qwen2_5_7b_star.yaml",
     description="MATH, Qwen2.5-7B-Instruct Star coordinator -> Analyst -> Verifier (fixed, single pass)",
 )

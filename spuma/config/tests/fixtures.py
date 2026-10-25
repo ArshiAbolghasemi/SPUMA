@@ -29,7 +29,7 @@ def isolated_env(tmp_path, monkeypatch):
 
 @pytest.fixture
 def config() -> Settings:
-    """The process-wide settings (`get_settings()`): the real config/math_ma_qwen2_5_7b_feedbackloop.yaml."""
+    """The process-wide settings (`get_settings()`): the real config/feedbackloop/math_ma_qwen2_5_7b_feedbackloop.yaml."""
     return get_settings()
 
 

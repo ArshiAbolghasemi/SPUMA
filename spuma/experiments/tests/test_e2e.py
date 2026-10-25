@@ -307,7 +307,7 @@ def test_star_pipeline_with_chmm(set_settings, tmp_path, fake_capabilities, monk
     from spuma.chmm.experiment import STANDALONE, CHMMAggregation, chmm_method  # noqa: PLC0415
     from spuma.config import PROJECT_ROOT, SETTINGS_FILE_ENV, get_settings  # noqa: PLC0415
 
-    monkeypatch.setenv(SETTINGS_FILE_ENV, str(PROJECT_ROOT / "config" / "math_ma_qwen2_5_7b_star.yaml"))
+    monkeypatch.setenv(SETTINGS_FILE_ENV, str(PROJECT_ROOT / "config" / "star" / "math_ma_qwen2_5_7b_star.yaml"))
     get_settings.cache_clear()
     cfg = set_settings(_config(get_settings(), tmp_path))
     engines = Engines()

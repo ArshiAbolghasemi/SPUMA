@@ -1,5 +1,5 @@
-# SPUMA — MATH with the fixed Star architecture (coordinator, analyst, verifier). Everything except the
-# agents, features and experiment name matches math_ma_qwen2_5_7b_feedbackloop.yaml. Each section is defined in its package's config.py and
+# SPUMA — MATH with the fixed Sequential architecture (analyst, verifier, finalizer). Everything except the
+# agents, features and experiment name matches config/feedbackloop/math_ma_qwen2_5_7b_feedbackloop.yaml. Each section is defined in its package's config.py and
 # assembled/validated by spuma.config.settings.Settings at startup.
 # Override any scalar with SPUMA_<SECTION>__<KEY>, e.g. SPUMA_MODEL__DEVICE=cpu.
 # Secrets (HF_TOKEN) go in .env, never here.
@@ -9,7 +9,7 @@ project:
   seed: 42
 
 experiment:
-  name: ma_qwen_math_star
+  name: ma_qwen_math_sequential
   output_dir: artifacts
   resume: true
   concurrent_problems: 8
@@ -48,66 +48,14 @@ model:
 
 models: {}
 
-# Star (fixed, single pass): star_delegate -> analyst -> star_request_verification -> verifier -> star_finalize.
-# Five model calls per problem; no loop, so agents.max_rounds is not used. Enabled agents, in order:
-# coordinator, analyst, verifier. User/phase templates are str.format templates ({problem}, {request},
-# {solution}, {assessment}): write a literal brace as {{ }}; \boxed{} instructions live in the system prompts.
+# Sequential (fixed, single pass): analyst -> verifier -> finalizer, one model call each (3 per problem); the
+# finalizer's response is graded. The Star roles without the coordinator: the Analyst and Verifier prompts are
+# Star's, the Finalizer's are Star's final-synthesis rules. Each agent gets its system prompt and one user
+# message: user_template with {problem} and {previous} (the earlier agents' responses, in order, joined by a
+# blank line). str.format templates: write a literal brace as {{ }}. TASK_DONE and max_rounds are not used.
 agents:
-  workflow: star
-  completion_token: TASK_DONE
+  workflow: sequential
   items:
-    - id: star
-      model: default
-      role: star_coordinator
-      enabled: true
-      system_prompt: |-
-        You are Star, the central coordinator of a multi-agent
-        mathematical reasoning system.
-
-        Your responsibility is to coordinate an Analyst and a
-        Verifier to solve the user's mathematical problem.
-
-        You must follow the assigned coordination phase.
-
-        PHASE 1 — DELEGATION:
-        - Read the mathematical problem.
-        - Identify what the Analyst should solve.
-        - Request a complete mathematical solution.
-        - Do not solve the problem yourself.
-        - Do not provide the final answer.
-
-        PHASE 2 — VERIFICATION REQUEST:
-        - Read the Analyst's solution.
-        - Summarize its key reasoning steps faithfully.
-        - Ask the Verifier to independently check the solution.
-        - Request identification of mathematical, algebraic,
-          logical, or computational errors.
-        - Do not correct the solution yourself.
-        - Do not produce a final answer.
-
-        PHASE 3 — FINAL SYNTHESIS:
-        - Read the original problem, Analyst's solution,
-          and Verifier's assessment.
-        - Determine the best-supported final answer.
-        - Prefer mathematically justified corrections
-          when the Verifier identifies an error.
-        - If the agents disagree, assess their arguments
-          using the available mathematical evidence.
-        - Do not invent verification results.
-        - Give a concise explanation of the final solution.
-        - Put the final mathematical answer inside \boxed{}.
-        - End your response with TASK_DONE.
-
-        GENERAL RULES:
-        - Follow the requested phase exactly.
-        - Do not simulate additional agents.
-        - Do not request additional iterations.
-        - Never access reference answers or grading labels.
-      templates:
-        delegation: "PHASE 1 — DELEGATION\n\nMathematical problem:\n{problem}\n\nWrite your delegation to the Analyst."
-        verification_request: "PHASE 2 — VERIFICATION REQUEST\n\nAnalyst's solution:\n{solution}\n\nWrite your verification request to the Verifier."
-        final_synthesis: "PHASE 3 — FINAL SYNTHESIS\n\nVerifier's assessment:\n{assessment}\n\nSynthesize the final answer."
-
     - id: analyst
       model: default
       role: analyst
@@ -136,7 +84,7 @@ agents:
         Do not simulate the Verifier or Coordinator.
         Do not access reference answers or grading labels.
         Do not output TASK_DONE.
-      user_template: "Mathematical problem:\n{problem}\n\nRequest from Star (the coordinator):\n{request}"
+      user_template: "Mathematical problem:\n{problem}"
 
     - id: verifier
       model: default
@@ -175,7 +123,35 @@ agents:
         Do not simulate other agents.
         Do not access reference answers or grading labels.
         Do not output TASK_DONE.
-      user_template: "Original mathematical problem:\n{problem}\n\nAnalyst's solution:\n{solution}\n\nVerification request from Star (the coordinator):\n{request}"
+      user_template: "Original mathematical problem:\n{problem}\n\nAnalyst's solution:\n{previous}"
+
+    - id: finalizer
+      model: default
+      role: finalizer
+      enabled: true
+      system_prompt: |-
+        You are the Finalizer, the last agent of a multi-agent
+        mathematical reasoning system.
+
+        You receive the original mathematical problem, the
+        Analyst's solution and the Verifier's assessment.
+
+        INSTRUCTIONS:
+        1. Read the original problem, the Analyst's solution,
+           and the Verifier's assessment.
+        2. Determine the best-supported final answer.
+        3. Prefer mathematically justified corrections
+           when the Verifier identifies an error.
+        4. If the agents disagree, assess their arguments
+           using the available mathematical evidence.
+        5. Do not invent verification results.
+        6. Give a concise explanation of the final solution.
+        7. Put the final mathematical answer inside \boxed{}.
+
+        Do not simulate other agents.
+        Do not request additional iterations.
+        Do not access reference answers or grading labels.
+      user_template: "Original mathematical problem:\n{problem}\n\nAnalyst's solution, then the Verifier's assessment:\n\n{previous}\n\nGive the final answer."
 
 dataset:
   name: math
@@ -236,10 +212,6 @@ aggregation:
 
 features:
   order:
-    - star_mcsp
-    - star_se
-    - star_nll
-    - star_length
     - analyst_mcsp
     - analyst_se
     - analyst_nll
@@ -248,6 +220,10 @@ features:
     - verifier_se
     - verifier_nll
     - verifier_length
+    - finalizer_mcsp
+    - finalizer_se
+    - finalizer_nll
+    - finalizer_length
 
 spn:
   backend: spflow

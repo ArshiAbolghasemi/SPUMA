@@ -4,7 +4,7 @@ from spuma.agents.tests.test_workflow import RecordingUQ
 from spuma.agents.workflow import FeedbackWorkflow, StarWorkflow, build_workflow
 from spuma.config import PROJECT_ROOT, SETTINGS_FILE_ENV, Settings, get_settings
 
-STAR_FILE = PROJECT_ROOT / "config" / "math_ma_qwen2_5_7b_star.yaml"
+STAR_FILE = PROJECT_ROOT / "config" / "star" / "math_ma_qwen2_5_7b_star.yaml"
 PROBLEM = "Solve 2x + 3 = 7."
 REFERENCE = "so \\boxed{2} (reference)"
 DELEGATE = "Analyst, please solve 2x + 3 = 7 completely."

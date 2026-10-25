@@ -1,4 +1,4 @@
-"""Typed settings: config/math_ma_qwen2_5_7b_feedbackloop.yaml, overridable by SPUMA_* env vars.
+"""Typed settings: config/feedbackloop/math_ma_qwen2_5_7b_feedbackloop.yaml, overridable by SPUMA_* env vars.
 
 The project-root `.env` holds secrets only (HF_TOKEN); it is exported into os.environ, where
 huggingface_hub picks the token up. It is not a settings field.
@@ -35,7 +35,7 @@ from spuma.spn.config import SPNConfig
 from spuma.uncertainty.config import AggregationConfig, FeaturesConfig, UncertaintyConfig
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_SETTINGS_FILE = PROJECT_ROOT / "config" / "math_ma_qwen2_5_7b_feedbackloop.yaml"
+DEFAULT_SETTINGS_FILE = PROJECT_ROOT / "config" / "feedbackloop" / "math_ma_qwen2_5_7b_feedbackloop.yaml"
 DEFAULT_DOTENV_FILE = PROJECT_ROOT / ".env"
 ENV_PREFIX = "SPUMA"
 SETTINGS_FILE_ENV = "SPUMA_CONFIG_FILE"

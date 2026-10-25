@@ -1,0 +1,319 @@
+# SPUMA — MATH with the fixed Star architecture (coordinator, analyst, verifier). Everything except the
+# agents, features and experiment name matches config/feedbackloop/math_ma_qwen2_5_7b_feedbackloop.yaml. Each section is defined in its package's config.py and
+# assembled/validated by spuma.config.settings.Settings at startup.
+# Override any scalar with SPUMA_<SECTION>__<KEY>, e.g. SPUMA_MODEL__DEVICE=cpu.
+# Secrets (HF_TOKEN) go in .env, never here.
+
+project:
+  name: spuma
+  seed: 42
+
+experiment:
+  name: ma_qwen_math_star
+  output_dir: artifacts
+  resume: true
+  concurrent_problems: 8
+
+model:
+  name: Qwen/Qwen2.5-7B-Instruct
+  revision: null
+  tokenizer_revision: null
+  backend: vllm
+  scoring_backend: same
+  dtype: bfloat16
+  enable_thinking: false
+  generation:
+    temperature: 0.7
+    top_p: 1.0
+    top_k: null
+    max_new_tokens: 2048
+
+  transformers:
+    device: auto
+    attn_implementation: sdpa
+    scoring_chunk_size: 256
+
+  vllm:
+    max_model_len: 8192
+    gpu_memory_utilization: 0.6
+    tensor_parallel_size: 1
+    max_logprobs: -1
+    enforce_eager: false
+
+  # Backend calls failing with a runtime error (CUDA OOM, engine errors), e.g. SPUMA_MODEL__RETRY__ATTEMPTS=5.
+  retry:
+    attempts: 3
+    wait_s: 1.0
+    max_wait_s: 30.0
+
+models: {}
+
+# Star (fixed, single pass): star_delegate -> analyst -> star_request_verification -> verifier -> star_finalize.
+# Five model calls per problem; no loop, so agents.max_rounds is not used. Enabled agents, in order:
+# coordinator, analyst, verifier. User/phase templates are str.format templates ({problem}, {request},
+# {solution}, {assessment}): write a literal brace as {{ }}; \boxed{} instructions live in the system prompts.
+agents:
+  workflow: star
+  completion_token: TASK_DONE
+  items:
+    - id: star
+      model: default
+      role: star_coordinator
+      enabled: true
+      system_prompt: |-
+        You are Star, the central coordinator of a multi-agent
+        mathematical reasoning system.
+
+        Your responsibility is to coordinate an Analyst and a
+        Verifier to solve the user's mathematical problem.
+
+        You must follow the assigned coordination phase.
+
+        PHASE 1 — DELEGATION:
+        - Read the mathematical problem.
+        - Identify what the Analyst should solve.
+        - Request a complete mathematical solution.
+        - Do not solve the problem yourself.
+        - Do not provide the final answer.
+
+        PHASE 2 — VERIFICATION REQUEST:
+        - Read the Analyst's solution.
+        - Summarize its key reasoning steps faithfully.
+        - Ask the Verifier to independently check the solution.
+        - Request identification of mathematical, algebraic,
+          logical, or computational errors.
+        - Do not correct the solution yourself.
+        - Do not produce a final answer.
+
+        PHASE 3 — FINAL SYNTHESIS:
+        - Read the original problem, Analyst's solution,
+          and Verifier's assessment.
+        - Determine the best-supported final answer.
+        - Prefer mathematically justified corrections
+          when the Verifier identifies an error.
+        - If the agents disagree, assess their arguments
+          using the available mathematical evidence.
+        - Do not invent verification results.
+        - Give a concise explanation of the final solution.
+        - Put the final mathematical answer inside \boxed{}.
+        - End your response with TASK_DONE.
+
+        GENERAL RULES:
+        - Follow the requested phase exactly.
+        - Do not simulate additional agents.
+        - Do not request additional iterations.
+        - Never access reference answers or grading labels.
+      templates:
+        delegation: "PHASE 1 — DELEGATION\n\nMathematical problem:\n{problem}\n\nWrite your delegation to the Analyst."
+        verification_request: "PHASE 2 — VERIFICATION REQUEST\n\nAnalyst's solution:\n{solution}\n\nWrite your verification request to the Verifier."
+        final_synthesis: "PHASE 3 — FINAL SYNTHESIS\n\nVerifier's assessment:\n{assessment}\n\nSynthesize the final answer."
+
+    - id: analyst
+      model: default
+      role: analyst
+      enabled: true
+      system_prompt: |-
+        You are the Analyst, an expert mathematical
+        problem-solving agent.
+
+        Your task is to solve the provided mathematical
+        problem independently and accurately.
+
+        INSTRUCTIONS:
+        1. Read the problem carefully.
+        2. Identify the mathematical concepts required.
+        3. Develop a logically consistent solution.
+        4. Show the essential mathematical derivations.
+        5. Perform algebraic and numerical calculations
+           carefully.
+        6. State assumptions when necessary.
+        7. Check the result when feasible.
+        8. Give a clear final answer inside \boxed{}.
+
+        Do not assume your solution is correct merely
+        because it appears plausible.
+
+        Do not simulate the Verifier or Coordinator.
+        Do not access reference answers or grading labels.
+        Do not output TASK_DONE.
+      user_template: "Mathematical problem:\n{problem}\n\nRequest from Star (the coordinator):\n{request}"
+
+    - id: verifier
+      model: default
+      role: verifier
+      enabled: true
+      system_prompt: |-
+        You are the Verifier, an independent mathematical
+        verification agent.
+
+        Your responsibility is to critically evaluate the
+        Analyst's proposed solution.
+
+        You receive:
+        - The original mathematical problem.
+        - The Analyst's solution.
+
+        INSTRUCTIONS:
+        1. Independently analyze the mathematical problem.
+        2. Check each essential step of the Analyst's reasoning.
+        3. Identify algebraic, arithmetic, logical, and
+           conceptual errors.
+        4. Verify whether the final answer satisfies the
+           original problem.
+        5. If the solution is correct, explicitly confirm it.
+        6. If the solution is incorrect, explain the error
+           and provide a corrected solution.
+        7. Do not automatically agree with the Analyst.
+        8. State your final verified answer inside \boxed{}.
+
+        Use this output structure:
+
+        VERDICT: CORRECT or INCORRECT or UNCERTAIN
+        EXPLANATION: <verification and reasoning>
+        VERIFIED_ANSWER: \boxed{<answer>}
+
+        Do not simulate other agents.
+        Do not access reference answers or grading labels.
+        Do not output TASK_DONE.
+      user_template: "Original mathematical problem:\n{problem}\n\nAnalyst's solution:\n{solution}\n\nVerification request from Star (the coordinator):\n{request}"
+
+dataset:
+  name: math
+  source: huggingface
+  hf_path: EleutherAI/hendrycks_math
+  seed: 42
+  train_samples: 800
+  validation_samples: 200
+  test_samples: 500
+
+uncertainty:
+  monte_carlo:
+    num_generations: 10
+    temperature: 0.7
+    top_p: 1.0
+    top_k: null
+    max_new_tokens: null
+    length_normalize: true
+
+  monte_carlo_sequence_probability:
+    enabled: true
+
+  semantic_entropy:
+    enabled: true
+    backend: uqlm
+    n: 10
+    temperature: 0.7
+    top_p: 1.0
+    top_k: null
+    max_new_tokens: null
+    equivalence: answer_aware
+    nli_model_name: tasksource/ModernBERT-large-nli
+    nli_max_length: 8000
+    nli_max_tokens: 2048
+    nli_batch_size: 32
+    nli_device: null
+
+  semantic_density:
+    enabled: false
+    nli_model_name: tasksource/ModernBERT-large-nli
+    nli_max_length: 8000
+    nli_max_tokens: 2048
+    nli_batch_size: 32
+    nli_device: null
+
+  nll:
+    enabled: true
+
+  token_length:
+    enabled: true
+
+aggregation:
+  monte_carlo_sequence_probability: rms
+  semantic_entropy: rms
+  semantic_density: rms
+  nll: rms
+  token_length: mean
+
+features:
+  order:
+    - star_mcsp
+    - star_se
+    - star_nll
+    - star_length
+    - analyst_mcsp
+    - analyst_se
+    - analyst_nll
+    - analyst_length
+    - verifier_mcsp
+    - verifier_se
+    - verifier_nll
+    - verifier_length
+
+spn:
+  backend: spflow
+  target: incorrect
+  seed: 42
+  leaf: histogram
+  histogram:
+    bins: 10
+    strategy: uniform
+    smoothing: 1.0
+  min_instances_slice: 50
+  min_features_slice: 2
+  n_clusters: 2
+  rdc_threshold: 0.3
+  keep_label_dependence: true
+  standardize: true
+  prior_smoothing: 1.0
+
+evaluation:
+  metrics:
+    - auroc
+    - auarc
+    - aurc
+    - auprc
+    - accuracy
+    - brier
+    - ece
+    - nll
+  ece_bins: 15
+  risk_models:
+    - spn
+    - spn_class_conditional
+
+  bootstrap:
+    enabled: true
+    iterations: 1000
+    confidence: 0.95
+    cluster_by: problem_id
+
+# CHMM (SAUP-inspired) situational weighting of the saved step uncertainties: trained in the train phase,
+# scored in evaluate, next to the risk models (artifacts in <scored>/chmm-<fp>/). Post-generation only.
+chmm:
+  enabled: true
+  alphas: [0.5, 1, 2, 4]     # lambda(alpha) = [1, 1+alpha, 1+2 alpha]; fixed, never fitted to labels
+  primary_alpha: 1
+  distance:
+    estimator: qa            # qa | lexical
+    model: deepset/roberta-base-squad2
+    revision: null
+    max_length: 384
+    stride: 128
+    max_question_tokens: 128
+    max_answer_tokens: 30
+    batch_size: 16
+    device: null             # null: mps, else cuda, else cpu
+  hmm:                       # hmmlearn GaussianHMM
+    n_components: 3
+    covariance_type: diag
+    n_iter: 200
+    random_state: 42
+  bootstrap_iterations: 10000
+  confidence: 0.95
+
+logging:
+  level: DEBUG
+  format: json
+  console: true
+  file: true
+  directory: logs

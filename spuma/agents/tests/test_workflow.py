@@ -152,3 +152,19 @@ def test_feedback_workflow_needs_two_agents(raw_config):
     raw_config["agents"]["items"][1]["enabled"] = False
     with pytest.raises(ValueError, match="exactly 2"):
         Settings.from_dict(raw_config)
+
+
+def test_sequential_experiment_runs_analyst_verifier_finalizer_once_each(monkeypatch, scripted_backend_cls):
+    from spuma.config import PROJECT_ROOT, SETTINGS_FILE_ENV, get_settings  # noqa: PLC0415
+
+    path = PROJECT_ROOT / "config" / "sequential" / "math_ma_qwen2_5_7b_sequential.yaml"
+    monkeypatch.setenv(SETTINGS_FILE_ENV, str(path))
+    get_settings.cache_clear()
+    backend = scripted_backend_cls([A1, "VERDICT: CORRECT\nVERIFIED_ANSWER: \\boxed{2}", A3])
+    traj = build_workflow(lambda _id: backend).run("p1", "Solve 2x + 3 = 7.")
+    assert [m["agent_id"] for m in traj.messages] == ["analyst", "verifier", "finalizer"]
+    assert len(backend.calls) == 3 and traj.final_answer_text == A3 and traj.termination_reason == "completed"
+    analyst, verifier, finalizer = (a.steps[0].input_messages for a in traj.agents)
+    assert "You are the Analyst" in analyst[0]["content"] and len(analyst) == len(verifier) == len(finalizer) == 2
+    assert A1 in verifier[1]["content"] and "Solve 2x + 3 = 7." in verifier[1]["content"]
+    assert A1 in finalizer[1]["content"] and "VERDICT: CORRECT" in finalizer[1]["content"]
