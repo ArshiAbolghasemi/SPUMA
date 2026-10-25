@@ -299,3 +299,47 @@ def test_concurrent_problems_give_identical_results(config, set_settings, tmp_pa
         rows = runner.store.read_json(f"{runner.scored_dir()}/features.json")
         outputs[concurrent] = {r["problem_id"]: (r["features"], r["label"]) for r in rows}
     assert len(outputs[1]) == 100 and outputs[1] == outputs[8]
+
+
+def test_star_pipeline_with_chmm(set_settings, tmp_path, fake_capabilities, monkeypatch):
+    """Star: five measured calls per problem, 12 per-agent features, the risk models and all nine CHMM-study methods
+    on the same trajectories; the final synthesis is the last step and the graded answer."""
+    from spuma.chmm.experiment import STANDALONE, CHMMAggregation, chmm_method  # noqa: PLC0415
+    from spuma.config import PROJECT_ROOT, SETTINGS_FILE_ENV, get_settings  # noqa: PLC0415
+
+    monkeypatch.setenv(SETTINGS_FILE_ENV, str(PROJECT_ROOT / "config" / "math_ma_qwen2_5_7b_star.yaml"))
+    get_settings.cache_clear()
+    cfg = set_settings(_config(get_settings(), tmp_path))
+    engines = Engines()
+    runner = ExperimentRunner(FakeDataset(), engines.factory, release=engines.release)
+    runner.run()
+    store, d = runner.store, runner.scored_dir()
+    feats = store.read_json(f"{d}/features.json")
+    assert len(feats) == 100 and list(feats[0]["features"]) == cfg.features.order and len(cfg.features.order) == 12
+    record = _record(runner, feats[0]["problem_id"])
+    traj = record["trajectory"]
+    assert [m["node"] for m in traj["messages"]] == [
+        "star_delegate",
+        "analyst",
+        "star_request_verification",
+        "verifier",
+        "star_finalize",
+    ]
+    assert traj["final_answer_text"] == traj["messages"][-1]["content"] and record["grade"]["label"] in (0, 1)
+    assert all(len(s["metrics"]) == 4 for a in traj["agents"] for s in a["steps"])
+    references = {
+        p["problem_id"]: p["reference_solution"] for ps in store.read_json("splits.json").values() for p in ps
+    }
+    for s in store.read_jsonl(f"{d}/steps.jsonl"):
+        assert not any(references[s["problem_id"]] in m["content"] for m in s["input_messages"])
+
+    summary = store.read_json("summary.json")
+    assert {"spn", "spn_class_conditional"} <= set(summary["models"])
+    methods = [*STANDALONE, "rms_spn", *(chmm_method(a) for a in cfg.chmm.alphas)]
+    assert list(summary["chmm"]) == methods
+    out = CHMMAggregation(runner).out
+    steps = store.read_jsonl(f"{out}/steps.jsonl")
+    first = [s for s in steps if s["problem_id"] == feats[0]["problem_id"]]
+    assert [s["agent_id"] for s in first] == ["star", "analyst", "star", "verifier", "star"]
+    assert [s["preceding"] for s in first] == [None, 0, 1, 2, 3]
+    assert sum(s["weights"]["1"] for s in first) == pytest.approx(1)

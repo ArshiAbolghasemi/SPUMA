@@ -48,6 +48,7 @@ class Trajectory(BaseModel):
     termination_reason: str = "final_message"
     error: str | None = None
     messages: list[dict[str, Any]] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)  # workflow-specific (star: phases, usage)
 
     def agent(self, agent_id: str) -> AgentTrace:
         return next(a for a in self.agents if a.agent_id == agent_id)

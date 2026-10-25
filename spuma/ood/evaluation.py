@@ -78,7 +78,7 @@ class OODEvaluation:
             if set(c.agents) != set(items):
                 raise ValueError(f"ood.agents {sorted(c.agents)} must name the source agents {sorted(items)}")
             for agent_id, prompt in c.agents.items():
-                items[agent_id].update(to_plain(prompt))
+                items[agent_id].update({k: v for k, v in to_plain(prompt).items() if v is not None})
             self._install(raw)
 
     def _install(self, raw: dict[str, Any]) -> Any:

@@ -19,6 +19,7 @@ class OODAgentPrompt:
     role: str
     system_prompt: str
     user_template: str = "{problem}"
+    templates: dict[str, str] | None = None  # star coordinator phase templates; None keeps the source's
 
 
 @dataclass(frozen=True)

@@ -434,8 +434,9 @@ class CHMMAggregation:
         for f in ("drift", "gap", "se", "nll"):
             pairs = [(r["rel"], r[f]) for r in multi if r[f] is not None]
             if len(pairs) > 2:
-                rho = spearmanr(*zip(*pairs, strict=True)).statistic
-                corr[f] = float(rho)
+                a, b = zip(*pairs, strict=True)
+                # undefined when either side is constant (e.g. uniform weights): reported as None
+                corr[f] = float(spearmanr(a, b).statistic) if len(set(a)) > 1 and len(set(b)) > 1 else None
         return {
             "alpha": alpha,
             "responses": len(rows),
@@ -536,7 +537,10 @@ class CHMMAggregation:
         lines += [
             "",
             "Spearman ρ of relative weight with: "
-            + ", ".join(f"{k} {v:+.3f}" for k, v in diagnostics["spearman_rel_weight_vs"].items()),
+            + ", ".join(
+                f"{k} {v:+.3f}" if v is not None else f"{k} — (constant)"
+                for k, v in diagnostics["spearman_rel_weight_vs"].items()
+            ),
             "",
             f"Checks: {evaluation['checks']}; λ: {evaluation['lambdas']}",
             "",
