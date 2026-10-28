@@ -1,0 +1,3 @@
+FINAL ANSWER FORMAT:
+REASONING: <the intermediate facts and the final operation>
+ANSWER: <a number, date, name, word, or letter only>

@@ -3,7 +3,7 @@
 Reference solutions live on `Problem` and are only read by graders; the workflow receives
 `problem_id` and `problem` text only.
 
-`DatasetExample` is the standardized record of the question-answering datasets (MMLU, MuSiQue, MedHopQA):
+`DatasetExample` is the standardized record of the question-answering datasets (MMLU, MuSiQue, MoreHopQA):
 agent-visible fields (question, choices, context) are rendered into `Problem.problem` by `to_problem`; private
 fields (reference answer, grading metadata: aliases, synonyms, decompositions, supporting-paragraph labels) go
 only to `Problem.reference_solution` / `Problem.metadata["grading"]`, which graders read and agents never see.
@@ -47,7 +47,10 @@ class DatasetExample:
     grading_metadata: dict[str, Any] = field(default_factory=dict)
 
     def visible_text(self) -> str:
-        """What the agents see: the question, then the lettered choices or the numbered context paragraphs."""
+        """What the agents see: the question, then the lettered choices or the numbered context paragraphs (a
+        closed-book question alone is shown as it is)."""
+        if self.choices is None and self.context is None:
+            return self.question
         parts = [f"Question:\n{self.question.strip()}"]
         if self.choices is not None:
             parts.append(
@@ -139,8 +142,6 @@ def select_splits(
     for split in SPLITS:
         source = sources[split]
         pool, start = shuffled[source], taken[source]
-        if sizes[split] is None:
-            sizes[split] = len(pool) - start
         if start + sizes[split] > len(pool):
             raise ValueError(
                 f"requested {sizes[split]} {split} problems from the official {source!r} split after {start} taken "
@@ -169,7 +170,7 @@ class AdapterDataset:
                 ("validation", sizes.validation_samples),
                 ("test", sizes.test_samples),
             )
-            if n is None or n
+            if n
         }
         pools = {
             name: [e.to_problem(name) for e in self.adapter.examples(name)] if name in needed else []

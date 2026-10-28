@@ -7,7 +7,6 @@ from typing import Any
 from spuma.config import get_settings
 from spuma.dataset.base import AnswerGrader, DatasetProvider
 from spuma.dataset.math import MathDataset, MathVerifyGrader
-from spuma.dataset.medhopqa import MedHopQADataset, MedHopQAGrader
 from spuma.dataset.mmlu import MMLUDataset, MMLUGrader
 from spuma.dataset.morehopqa import MoreHopQADataset, MoreHopQAGrader
 from spuma.dataset.musique import MuSiQueDataset, MuSiQueGrader
@@ -17,9 +16,8 @@ DATASETS: dict[str, tuple[Callable[[], DatasetProvider], Callable[[], AnswerGrad
     "morehopqa": (MoreHopQADataset, MoreHopQAGrader),
     "mmlu": (MMLUDataset, MMLUGrader),
     "musique": (MuSiQueDataset, MuSiQueGrader),
-    "medhopqa": (MedHopQADataset, MedHopQAGrader),
 }
-ADAPTERS = {"mmlu": MMLUDataset, "musique": MuSiQueDataset, "medhopqa": MedHopQADataset}
+ADAPTERS = {"mmlu": MMLUDataset, "musique": MuSiQueDataset, "morehopqa": MoreHopQADataset}
 
 
 def load_dataset_adapter(dataset_name: str, split: str, config: Any = None, seed: int | None = None) -> list[dict]:

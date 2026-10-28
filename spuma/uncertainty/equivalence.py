@@ -9,9 +9,9 @@ UQLM's clusterer asks its NLI object, for pairs of texts, whether they mean the 
       normalization or as the same date under dateutil; other answers go to math-verify. Math-verify treats
       letters as commuting symbols ("listen" == "silent"), so short-answer QA keeps text away from it; MATH
       does not, because its text-looking answers (units, `pmatrix`, "0 and 4") are math;
-      MMLU, MuSiQue, MedHopQA: the answer is the last `ANSWER:` / `VERIFIED_ANSWER:` / `SUGGESTED_ANSWER:` line
-      instead of \\boxed{} (`answer_extractor`); MMLU answers are equal as the same option letter, MuSiQue and
-      MedHopQA answers after SQuAD normalization;
+      MMLU, MuSiQue: the answer is the last `ANSWER:` / `VERIFIED_ANSWER:` / `SUGGESTED_ANSWER:` line instead of
+      \\boxed{} (`answer_extractor`); MMLU answers are equal as the same option letter, MuSiQue answers after SQuAD
+      normalization; MoreHopQA takes \\boxed{}, else such a line;
   - exactly one does: not equivalent (one commits to an answer, the other does not);
   - neither does (unfinished reasoning, no boxed answer): the wrapped NLI model decides, unchanged.
 Samples are only compared with each other; the reference answer is never involved.
@@ -85,12 +85,18 @@ ANSWER_EQUIVALENCE: dict[str, Callable[[str, str], bool]] = {
     "morehopqa": qa_answers_equivalent,
     "mmlu": letter_equivalent,
     "musique": text_equivalent,
-    "medhopqa": text_equivalent,
 }
+
+
+def boxed_or_answer(text: str) -> str | None:
+    boxed = boxed_answer(text)
+    return boxed if boxed is not None else any_answer(text)
+
+
 ANSWER_EXTRACTORS: dict[str, Callable[[str], str | None]] = {
     "mmlu": any_answer,
     "musique": any_answer,
-    "medhopqa": any_answer,
+    "morehopqa": boxed_or_answer,
 }
 
 

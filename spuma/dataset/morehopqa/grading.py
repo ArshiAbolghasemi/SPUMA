@@ -1,7 +1,8 @@
 """MoreHopQA grading of the final answer against the reference (evaluation side only, never exposed to agents).
 
-The final answer is the last \\boxed{} of the final message (the agents' prompts ask for \\boxed{}); without one
-the answer is graded incorrect and flagged `parse_failure`. A boxed answer is correct when, after removing
+The final answer is the last \\boxed{} of the final message (the MATH-style prompts ask for \\boxed{}), else its
+last `ANSWER:` line (the question-answering prompts' format); without either the answer is graded incorrect and
+flagged `parse_failure`. A boxed answer is correct when, after removing
 LaTeX text wrappers, it matches the reference:
   - number: equal numeric value (thousands separators ignored), else Math-Verify equivalence;
   - date / datetime: the same calendar date (and minute, for datetime) after parsing both;
@@ -83,6 +84,10 @@ class MoreHopQAGrader:
 
     def grade(self, problem: Problem, final_text: str) -> Grade:
         boxed = extract_boxed(final_text)
+        if boxed is None:
+            from spuma.dataset.qa import final_answer  # noqa: PLC0415 - qa imports this module
+
+            boxed = final_answer(final_text)
         predicted = clean(boxed) if boxed is not None else None
         reference = problem.reference_solution
         if predicted is None:

@@ -1,0 +1,6 @@
+DATASET-SPECIFIC VERIFICATION AND FINALIZATION (MoreHopQA):
+- Verify each entity and intermediate fact on the reasoning chain.
+- Recompute the final operation (arithmetic, date, or symbolic step) independently.
+- Check that the answer has the type the question asks for (number, date, name, word, or letter).
+- A reviewer must validate both the facts and the final operation.
+- The final answer is a single short value, without explanation on the ANSWER line.

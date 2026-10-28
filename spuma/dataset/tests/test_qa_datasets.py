@@ -1,4 +1,4 @@
-"""MMLU, MuSiQue and MedHopQA: adapters, split selection, agent-visible vs private fields, answer extraction and
+"""MMLU, MuSiQue and MoreHopQA: adapters, split selection, agent-visible vs private fields, answer extraction and
 grading. Fake loaders stand in for the Hub / local files (offline)."""
 
 import dataclasses
@@ -8,9 +8,8 @@ import pytest
 
 from spuma.config import PROJECT_ROOT, SETTINGS_FILE_ENV, get_settings
 from spuma.dataset.base import Problem
-from spuma.dataset.medhopqa import MedHopQADataset, MedHopQAGrader
-from spuma.dataset.medhopqa.loader import detect_fields
 from spuma.dataset.mmlu import MMLUDataset, MMLUGrader
+from spuma.dataset.morehopqa import MoreHopQADataset, MoreHopQAGrader
 from spuma.dataset.musique import MuSiQueDataset, MuSiQueGrader
 from spuma.dataset.qa import any_answer, final_answer, is_insufficient, option_letter
 from spuma.dataset.registry import load_dataset_adapter
@@ -136,43 +135,32 @@ def test_musique_grading_aliases_and_unanswerable(monkeypatch):
     assert blind.reference_solution is None
 
 
-def test_medhopqa_detects_columns_keeps_only_labeled_and_grades_synonyms(monkeypatch):
-    config = _settings(monkeypatch, "medhopqa")
-    rows = [
-        {"qid": "q1", "Question": "Which gene is mutated in X?", "answer": ["BRCA1", "breast cancer 1"]},
+def test_morehopqa_is_closed_book_and_grades_the_answer_line(monkeypatch):
+    config = _settings(monkeypatch, "morehopqa", train_samples=1, validation_samples=1, test_samples=2)
+    verified = [
         {
-            "qid": "q2",
-            "Question": "Which organism causes Y?",
-            "answer": "Plasmodium falciparum",
-            "synonyms": "P. falciparum",
-        },
-        {"qid": "q3", "Question": "Blind question?", "answer": None},
+            "question": f"What is {i} more than the founding year of club {i}?",
+            "answer": str(1900 + 2 * i),
+            "answer_type": "number",
+            "previous_question": f"Hop {i}?",
+            "context": [["Club", ["SECRET context"]]],
+        }
+        for i in range(4)
     ]
-    splits = MedHopQADataset(lambda _: rows, config).load()
-    test = {p.problem_id: p for p in splits["test"]}
-    assert set(test) == {"medhopqa/dev/q1", "medhopqa/dev/q2"} and not splits["train"]
-    q1, q2 = test["medhopqa/dev/q1"], test["medhopqa/dev/q2"]
-    assert "BRCA1" not in q1.problem and q1.problem.startswith("Question:\nWhich gene")
-    grader = MedHopQAGrader()
-    assert grader.grade(q1, "ANSWER: Breast Cancer 1").label == 0
-    assert grader.grade(q2, "REASONING: r\nANSWER: P. falciparum\nTASK_DONE").label == 0
-    assert grader.grade(q2, "ANSWER: Plasmodium vivax").label == 1
-    all_rows = MedHopQADataset(lambda _: rows, dataclasses.replace(config, labeled_only=False)).load()["test"]
-    assert sum(p.reference_solution is None for p in all_rows) == 1
+    unverified = [{**r, "_id": f"u{i}", "previous_question": f"Hop {i + 2}?"} for i, r in enumerate(verified)]
+    splits = MoreHopQADataset(lambda url: unverified if url.endswith(".json") else verified, config).load()
+    # u0 and u1 share their first hop with verified questions 2 and 3: never trained on
+    assert {p.problem_id for p in splits["train"] + splits["validation"]} == {
+        "morehopqa/train/u2",
+        "morehopqa/train/u3",
+    }
+    p = splits["test"][0]
+    assert p.problem.startswith("What is") and "SECRET" not in p.problem and p.reference_solution not in p.problem
+    assert MoreHopQAGrader().grade(p, f"REASONING: r\nANSWER: {p.reference_solution}\nTASK_DONE").label == 0
+    assert MoreHopQAGrader().grade(p, "ANSWER: 12").label == 1
 
 
-def test_medhopqa_schema_problems_name_the_actual_columns(monkeypatch):
-    with pytest.raises(ValueError, match="ambiguous MedHopQA id column"):
-        detect_fields(["id", "qid", "question"], {})
-    with pytest.raises(ValueError, match=r"no MedHopQA question column.*\['id', 'text'\]"):
-        detect_fields(["id", "text"], {})
-    assert detect_fields(["id", "text"], {"question": "text"})["question"] == "text"
-    config = _settings(monkeypatch, "medhopqa")
-    with pytest.raises(ValueError, match="no labeled training data"):
-        MedHopQADataset(lambda _: [], dataclasses.replace(config, train_samples=5))
-
-
-@pytest.mark.parametrize("dataset", ["mmlu", "musique", "medhopqa"])
+@pytest.mark.parametrize("dataset", ["mmlu", "musique", "morehopqa"])
 def test_every_architecture_selects_the_same_problems(monkeypatch, dataset):
     sections = []
     for architecture in ARCHITECTURES:

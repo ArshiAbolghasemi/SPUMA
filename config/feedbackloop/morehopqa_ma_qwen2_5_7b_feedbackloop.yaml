@@ -1,4 +1,4 @@
-# SPUMA — MedHopQA (BioCreative IX), open-ended biomedical multi-hop questions.
+# SPUMA — MoreHopQA (alabnii/morehopqa), closed-book multi-hop questions with a reasoning step on the last hop.
 # Feedback loop: solver <-> reviewer until the reviewer ends with TASK_DONE or 10 rounds; the solver's last response is graded.
 # System prompts are composed from config/prompts/ fragments: general rules (roles/general) + dataset instructions + role
 # (+ dataset-specific verification rules) + output schema. Every other section matches
@@ -10,7 +10,7 @@ project:
   seed: 42
 
 experiment:
-  name: ma_qwen_medhopqa_feedbackloop
+  name: ma_qwen_morehopqa_feedbackloop
   output_dir: artifacts
   resume: true
   concurrent_problems: 8
@@ -56,30 +56,30 @@ agents:
   items:
     - id: solver
       role: solver
-      prompt: [roles/general, datasets/medhopqa, roles/feedback_solver, schemas/medhopqa]
+      prompt: [roles/general, datasets/morehopqa, roles/feedback_solver, schemas/morehopqa]
       user_template: "{problem}"
     - id: reviewer
       role: reviewer
-      prompt: [roles/general, datasets/medhopqa, roles/feedback_reviewer, verification/medhopqa, schemas/medhopqa]
+      prompt: [roles/general, datasets/morehopqa, roles/feedback_reviewer, verification/morehopqa, schemas/morehopqa]
       user_template: "{problem}\n\nLatest response from the Solver:\n{previous}\n\nReview the response and give your feedback. If the answer is adequately justified, end with TASK_DONE."
 
 dataset:
-  name: medhopqa
-  # Manual download from the BioCreative IX CodaBench competition (codabench.org/competitions/7609, registration
-  # required). Only the development set has gold answers; the ~10,000-question package (with the hidden 1,000
-  # test questions) has none. No labeled training data exists, so no SPN or CHMM is fitted on MedHopQA: its
-  # results come from the MATH-trained models, frozen (chmm.frozen_from). Columns are detected from the file and
-  # logged; set `fields` if detection fails.
-  source: local
+  name: morehopqa
+  source: huggingface
+  hf_path: alabnii/morehopqa
+  revision: e839079eb8eb686ecf42c6d334a87964f1b90eef
+  # test: the human-verified set (1,118). train / validation: the generated set whose answers were NOT human-verified
+  # (2,502), minus every question sharing its first hop (previous_question) with a verified question. Closed-book:
+  # the agents see only the question.
   data_files:
-    dev: data/medhopqa/dev.json  # the labeled development set (json, jsonl, csv or tsv)
+    test: verified/test-00000-of-00001.parquet
+    train: data/without_human_verification.json
   subsets: []
-  labeled_only: true         # false: also generate on unlabeled questions (scored, never graded)
   seed: 42
-  split_sources: {train: dev, validation: dev, test: dev}
-  train_samples: 0
-  validation_samples: 0
-  test_samples: null         # every labeled development question
+  split_sources: {train: train, validation: train, test: test}
+  train_samples: 480         # 616 unverified questions survive the first-hop filter
+  validation_samples: 120
+  test_samples: 500
 
 uncertainty:
   monte_carlo:

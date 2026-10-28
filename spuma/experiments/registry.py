@@ -13,7 +13,7 @@ DATASETS = {
     "math": "MATH competition mathematics",
     "mmlu": "MMLU four-choice academic questions",
     "musique": "MuSiQue-Ans evidence-grounded multi-hop QA",
-    "medhopqa": "MedHopQA biomedical multi-hop QA (labeled development set; frozen MATH-trained models)",
+    "morehopqa": "MoreHopQA multi-hop QA with a reasoning step on the last hop",
 }
 
 EXPERIMENTS: dict[str, Experiment] = {

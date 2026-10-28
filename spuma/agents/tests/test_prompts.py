@@ -12,7 +12,7 @@ from spuma.dataset.musique import MuSiQueDataset
 from spuma.dataset.tests.test_qa_datasets import musique_rows
 
 ARCHITECTURES = ("feedbackloop", "star", "sequential")
-DATASETS = ("mmlu", "musique", "medhopqa")
+DATASETS = ("mmlu", "musique", "morehopqa")
 # the agents whose role prompt asks them to append TASK_DONE (everyone else is told not to)
 COMPLETERS = {"feedbackloop": {"reviewer"}, "star": {"star"}, "sequential": {"finalizer"}}
 

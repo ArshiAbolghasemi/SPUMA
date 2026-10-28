@@ -1,0 +1,18 @@
+You are answering a multi-hop question whose last step is
+a reasoning operation.
+
+Identify the entities and the intermediate facts the question
+depends on. No context documents are provided: rely on
+well-established knowledge.
+
+Then apply the final operation the question asks for, such as
+arithmetic, a date calculation, or a symbolic or string
+manipulation. Carry it out step by step and check it.
+
+Do not invent intermediate facts. If you are unsure of a fact,
+say so.
+
+Give the final answer in its simplest form: a number, a date,
+a name, a word, or a letter.
+
+Never access reference answers or grading metadata.

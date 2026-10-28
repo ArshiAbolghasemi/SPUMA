@@ -1,4 +1,5 @@
-"""Answer extraction and grading shared by the question-answering datasets (MMLU, MuSiQue, MedHopQA).
+"""Answer extraction and grading shared by the question-answering datasets (MMLU, MuSiQue; MoreHopQA's grader
+reads `ANSWER:` lines through `final_answer` when there is no \\boxed{} answer).
 
 Their prompts end every answer-giving response with an `ANSWER: <answer>` line (verifiers and reviewers write
 `VERIFIED_ANSWER:` / `SUGGESTED_ANSWER:`). The graded answer is the last `ANSWER:` line of the final response;
