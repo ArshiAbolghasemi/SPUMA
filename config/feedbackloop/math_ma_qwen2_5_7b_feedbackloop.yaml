@@ -25,7 +25,7 @@ model:
     temperature: 0.7
     top_p: 1.0
     top_k: null
-    max_new_tokens: 2048
+    max_new_tokens: 4096
 
   transformers:
     device: auto
@@ -33,7 +33,7 @@ model:
     scoring_chunk_size: 256
 
   vllm:
-    max_model_len: 8192
+    max_model_len: 32768    # Qwen2.5-7B-Instruct's native maximum
     gpu_memory_utilization: 0.6
     tensor_parallel_size: 1
     max_logprobs: -1

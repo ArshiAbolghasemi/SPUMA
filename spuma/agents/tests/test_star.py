@@ -125,5 +125,5 @@ def test_star_settings_need_three_agents_and_the_phase_templates(star):
 
 
 def test_feedback_loop_is_unchanged(config, scripted_backend_cls):
-    assert config.agents.workflow == "feedback" and config.generation_fingerprint() == "73c7092a6566"
+    assert config.agents.workflow == "feedback" and config.generation_fingerprint() == "abd7258c8f95"
     assert isinstance(build_workflow(lambda _id: scripted_backend_cls([])), FeedbackWorkflow)
