@@ -277,8 +277,7 @@ evaluation:
     - ece
     - nll
   ece_bins: 15
-  risk_models:
-    - spn
+  risk_models: []  # SPNs are trained and evaluated by the chmm: section
 
   bootstrap:
     enabled: true
@@ -309,6 +308,7 @@ chmm:
     random_state: 42
   bootstrap_iterations: 10000
   confidence: 0.95
+  feature_layout: per_agent  # per_agent (feedback: per agent; star/sequential: per response) | pooled
 
 logging:
   level: DEBUG

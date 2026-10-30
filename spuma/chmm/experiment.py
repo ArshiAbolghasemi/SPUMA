@@ -13,8 +13,15 @@ splits) and regenerates nothing.
     5. methods, all on the same problems, labels and splits:
          rms_se, rms_mcsp, last_se, last_mcsp       standalone scores (no SPN); MCSP is a confidence, so its
                                                     error score is -MCSP
-         rms_spn                                    SPN on Z = RMS over all responses of [SE, MCSP, NLL, length]
-         chmm_a<alpha>_spn                          SPN on Z = sum_t w_t [SE_t, MCSP_t, NLL_t, length_t]
+         rms_spn                                    SPN on Z = RMS of [SE, MCSP, NLL, length] per feature group
+         chmm_a<alpha>_spn                          SPN on Z = CHMM-weighted [SE, MCSP, NLL, length] per group
+       Feature groups (`chmm.feature_layout`): per_agent = the feedback loop's solver and reviewer (each over all its
+       rounds), and each response of the fixed star (its five nodes) and sequential (solver, verifier, finalizer)
+       workflows on its own; pooled = all responses together. Star and sequential have nothing to aggregate (one
+       response per group), so they get a single `spn` on the raw features and no CHMM. Every SPN also reports its
+       posterior entropy (`<method>_entropy`, a ranking score only). A group's CHMM feature is
+       sum_{t in g} (T / n_g) w_t U_t with the trajectory-normalized w_t: with uniform weights the group mean (the
+       weighted mean when pooled), a single response scaled by its relative weight T w_t.
        One joint SPN per SPN method (the `spn:` section, unchanged), trained on the training split.
        Standalone scores are ranked as they are; their Brier/ECE are reported only after a Platt (logistic)
        calibrator fitted on the training split.
@@ -41,6 +48,7 @@ from scipy.stats import spearmanr
 from sklearn.linear_model import LogisticRegression
 
 from spuma.agents.trajectory import Trajectory
+from spuma.agents.workflow.star import StarWorkflow
 from spuma.chmm.distances import ESTIMATORS, situational_distances
 from spuma.chmm.hmm import STATE_NAMES, SituationalHMM, state_coefficients, step_weights
 from spuma.common.config import to_plain
@@ -48,7 +56,7 @@ from spuma.common.logs import progress
 from spuma.common.utils import safe_name, stable_hash
 from spuma.config import PROJECT_ROOT, get_settings
 from spuma.dataset.math.answers import extract_boxed
-from spuma.evaluation.metrics import METRICS, expected_calibration_error
+from spuma.evaluation.metrics import METRICS, binary_entropy, expected_calibration_error
 from spuma.spn.model import JointSPN
 
 logger = logging.getLogger(__name__)
@@ -57,12 +65,15 @@ FEATURES = ("se", "mcsp", "nll", "length")
 STANDALONE = ("rms_se", "rms_mcsp", "last_se", "last_mcsp")
 METRIC_NAMES = ("auroc", "auprc", "auarc", "aurc", "brier", "ece")
 CALIBRATION = ("brier", "ece")
+# per_agent feature groups of the agent-addressed workflows, by agent position (names shared across datasets)
+GROUPS = {"feedback": ("solver", "reviewer"), "sequential": ("solver", "verifier", "finalizer")}
 LABELS = {
     "rms_se": "RMS SE",
     "rms_mcsp": "RMS MCSP",
     "last_se": "Last-step SE",
     "last_mcsp": "Last-step MCSP",
     "rms_spn": "RMS SPN",
+    "spn": "SPN",
 }
 
 
@@ -79,6 +90,7 @@ def chronological_steps(trajectory: Trajectory) -> list[dict[str, Any]]:
     by_agent = {a.agent_id: a for a in trajectory.agents}
     seen: dict[str, int] = defaultdict(int)
     out = []
+    position = {a.agent_id: i for i, a in enumerate(trajectory.agents)}
     for m in trajectory.messages:
         agent = by_agent[m["agent_id"]]
         step = agent.steps[seen[agent.agent_id]]
@@ -86,6 +98,8 @@ def chronological_steps(trajectory: Trajectory) -> list[dict[str, Any]]:
         out.append(
             {
                 "agent_id": agent.agent_id,
+                "agent_index": position[agent.agent_id],
+                "node": m.get("node"),
                 "role": agent.role,
                 "round": step.round,
                 "step_id": step.step_id,
@@ -99,8 +113,12 @@ def chronological_steps(trajectory: Trajectory) -> list[dict[str, Any]]:
 
 
 def chmm_fingerprint(config: Any) -> str:
-    """Cache key of the CHMM directory; `frozen_from` only adds evaluations, so it is not part of it."""
-    return stable_hash({k: v for k, v in to_plain(config).items() if k != "frozen_from"})
+    """Cache key of the CHMM directory; `frozen_from` only adds evaluations, so it is not part of it, and the
+    pooled layout hashes as before the per-agent one existed (its existing results stay valid)."""
+    plain = {k: v for k, v in to_plain(config).items() if k != "frozen_from"}
+    if plain["feature_layout"] == "pooled":
+        del plain["feature_layout"]
+    return stable_hash(plain)
 
 
 def trained_dir(experiment_name: str) -> tuple[Path, Any]:
@@ -127,9 +145,32 @@ class CHMMAggregation:
         self.out = out or f"{runner.scored_dir()}/chmm-{chmm_fingerprint(self.config)}"
         self._cache: list[dict[str, Any]] | None = None
 
+    def groups(self) -> list[str]:
+        """The feature groups, in feature order (one unnamed group when pooled)."""
+        if self.config.feature_layout == "pooled":
+            return [""]
+        workflow = get_settings().agents.workflow
+        return [node for node, _, _ in StarWorkflow.NODES] if workflow == "star" else list(GROUPS[workflow])
+
+    def _group(self, step: dict[str, Any]) -> str:
+        if self.config.feature_layout == "pooled":
+            return ""
+        workflow = get_settings().agents.workflow
+        return step["node"] if workflow == "star" else GROUPS[workflow][step["agent_index"]]
+
+    @property
+    def feature_names(self) -> list[str]:
+        return [f"{g}_{f}" if g else f for g in self.groups() for f in FEATURES]
+
+    @property
+    def uses_chmm(self) -> bool:
+        """CHMM weighting needs agents with several responses to aggregate: the feedback loop (or the pooled layout).
+        Star and sequential have one SPN on each response's raw features."""
+        return get_settings().agents.workflow == "feedback" or self.config.feature_layout == "pooled"
+
     @property
     def spn_methods(self) -> list[str]:
-        return ["rms_spn", *(chmm_method(a) for a in self.config.alphas)]
+        return ["rms_spn", *(chmm_method(a) for a in self.config.alphas)] if self.uses_chmm else ["spn"]
 
     def lambdas(self) -> dict[str, list[float]]:
         return {f"{a:g}": state_coefficients(a).tolist() for a in self.config.alphas}
@@ -142,17 +183,18 @@ class CHMMAggregation:
             logger.warning("chmm training skipped", extra={"reason": reason, "frozen_from": self.config.frozen_from})
             self.store.write_json(f"{self.out}/status.json", {"status": "skipped", "reason": reason})
             return
-        hmm = SituationalHMM(self.config.hmm).fit([p["x"] for p in problems])
-        hmm.save(self.store.path(f"{self.out}/models/chmm.pkl"))
-        described = {**hmm.describe(), "lambdas": self.lambdas(), "train_problems": len(problems)}
-        self.store.write_json(f"{self.out}/chmm.json", described)
-        logger.info("chmm fitted", extra=described)
-        self._weigh(problems, hmm)
+        if self.uses_chmm:
+            hmm = SituationalHMM(self.config.hmm).fit([p["x"] for p in problems])
+            hmm.save(self.store.path(f"{self.out}/models/chmm.pkl"))
+            described = {**hmm.describe(), "lambdas": self.lambdas(), "train_problems": len(problems)}
+            self.store.write_json(f"{self.out}/chmm.json", described)
+            logger.info("chmm fitted", extra=described)
+            self._weigh(problems, hmm)
         y = np.array([p["label"] for p in problems])
         spn = get_settings().spn
         for m in self.spn_methods:
             model = JointSPN.__new__(JointSPN)
-            model._init(spn, list(FEATURES))
+            model._init(spn, self.feature_names)
             model.fit(self._aggregate(problems, m), y)
             model.save(self.store.path(f"{self.out}/models/{m}.pt"))
             status = {"status": "trained", "train_rows": len(y), "incorrect": int(y.sum()), **model.summary()}
@@ -169,18 +211,23 @@ class CHMMAggregation:
         """The nine methods on the test split, with the CHMM, SPNs and calibrators of `train` (or of
         `frozen_from`, another experiment's chmm directory) loaded and frozen."""
         src = Path(frozen_from) if frozen_from is not None else self.store.path(self.out)
-        if not (src / "models" / "chmm.pkl").is_file():
-            raise RuntimeError(f"no trained CHMM in {src}: run the train phase first")
-        hmm = SituationalHMM.load(src / "models" / "chmm.pkl")
-        trained = json.loads((src / "chmm.json").read_text())
+        if not (src / "models" / "calibrators.json").is_file():
+            raise RuntimeError(f"no trained models in {src}: run the train phase first")
         models = {m: JointSPN.load(src / "models" / f"{m}.pt") for m in self.spn_methods}
+        for m, model in models.items():
+            if model.feature_names != self.feature_names:
+                raise ValueError(f"{src}: {m} was trained on {model.feature_names}, not {self.feature_names}")
         calibrators = json.loads((src / "models" / "calibrators.json").read_text())
-        if frozen_from is not None:
-            self.store.write_json(f"{self.out}/chmm.json", {**trained, "frozen_from": str(src)})
-
         problems = self._problems()
-        self._weigh(problems, hmm)
-        checks = self._checks(problems, hmm, trained["lambdas"])
+        trained: dict[str, Any] = {}
+        checks: dict[str, Any] = {}
+        if self.uses_chmm:
+            hmm = SituationalHMM.load(src / "models" / "chmm.pkl")
+            trained = json.loads((src / "chmm.json").read_text())
+            if frozen_from is not None:
+                self.store.write_json(f"{self.out}/chmm.json", {**trained, "frozen_from": str(src)})
+            self._weigh(problems, hmm)
+            checks = self._checks(problems, hmm, trained["lambdas"])
         idx = np.array([p["split"] == "test" for p in problems])
         if not idx.any():
             raise RuntimeError("chmm: no labeled test problems")
@@ -195,20 +242,23 @@ class CHMMAggregation:
         for m in self.spn_methods:
             p_err = models[m].predict_error_proba(Z[m][idx])
             scores[m] = {"rank": p_err, "prob": p_err}
+            scores[f"{m}_entropy"] = {"rank": binary_entropy(p_err), "prob": None}  # a ranking score only
 
         evaluation = self._evaluate(y, groups, scores)
         evaluation |= {
             "run_id": self.runner.run_id,
             "frozen_from": None if frozen_from is None else str(src),
             "checks": checks,
-            "lambdas": trained["lambdas"],
+            "lambdas": trained.get("lambdas"),
             "n_test": int(len(y)),
             "test_accuracy": float(1 - y.mean()),
         }
         self.store.write_json(f"{self.out}/evaluation.json", evaluation)
         self._write_records(problems, Z, standalone, scores, idx)
-        diagnostics = self._diagnostics([p for p, t in zip(problems, idx, strict=True) if t])
-        self.store.write_json(f"{self.out}/diagnostics.json", diagnostics)
+        diagnostics = None
+        if self.uses_chmm:
+            diagnostics = self._diagnostics([p for p, t in zip(problems, idx, strict=True) if t])
+            self.store.write_json(f"{self.out}/diagnostics.json", diagnostics)
         self._report(evaluation, diagnostics, trained)
         logger.info("chmm evaluation", extra={"output": self.out, "n_test": len(y)})
         return evaluation
@@ -220,7 +270,7 @@ class CHMMAggregation:
         labeled training data). Frozen: for each `chmm.frozen_from` experiment, its trained models evaluated here
         unchanged, in `<chmm dir>/frozen-<source>/`; nothing is fitted on this dataset's labels."""
         out: dict[str, Any] = {"dataset_specific": None, "frozen": {}}
-        if (self.store.path(self.out) / "models" / "chmm.pkl").is_file():
+        if (self.store.path(self.out) / "models" / "calibrators.json").is_file():
             out["dataset_specific"] = self.evaluate()
         else:
             logger.warning(
@@ -229,11 +279,15 @@ class CHMMAggregation:
             )
         for source in self.config.frozen_from:
             src, source_config = trained_dir(source)
-            if not (src / "models" / "chmm.pkl").is_file():
+            if not (src / "models" / "calibrators.json").is_file():
                 logger.warning("frozen source not trained yet; skipped", extra={"source": source, "path": str(src)})
                 continue
-            if source_config.distance != self.config.distance or source_config.alphas != self.config.alphas:
-                raise ValueError(f"chmm.frozen_from {source}: its distance estimator or alphas differ from these")
+            if (source_config.distance, source_config.alphas, source_config.feature_layout) != (
+                self.config.distance,
+                self.config.alphas,
+                self.config.feature_layout,
+            ):
+                raise ValueError(f"chmm.frozen_from {source}: distance estimator, alphas or feature layout differ")
             frozen = CHMMAggregation(self.runner, out=f"{self.out}/frozen-{source}")
             frozen._cache = self._problems()
             out["frozen"][source] = frozen.evaluate(frozen_from=src)
@@ -267,7 +321,8 @@ class CHMMAggregation:
                     "steps": chronological_steps(trajectory),
                 }
             )
-        self._distances(problems)
+        if self.uses_chmm:
+            self._distances(problems)
         self._cache = problems
         return problems
 
@@ -318,14 +373,23 @@ class CHMMAggregation:
     # -- features --------------------------------------------------------------------------------------------
 
     def _aggregate(self, problems: list[dict[str, Any]], method: str) -> np.ndarray:
+        """One row per problem: the group features in `feature_names` order (NaN for an absent group, which the
+        SPN integrates out)."""
+        alpha = next((a for a in self.config.alphas if chmm_method(a) == method), None)
         out = []
         for p in problems:
             U = np.array([[s["metrics"][f] for f in FEATURES] for s in p["steps"]])
-            if method == "rms_spn":
-                out.append(_rms(U))
-            else:
-                alpha = next(a for a in self.config.alphas if chmm_method(a) == method)
-                out.append(p["weights"][alpha] @ U)
+            member = [self._group(s) for s in p["steps"]]
+            row = []
+            for g in self.groups():
+                idx = [t for t, name in enumerate(member) if name == g]
+                if not idx:
+                    row.append(np.full(len(FEATURES), np.nan))
+                elif alpha is None:
+                    row.append(_rms(U[idx]))
+                else:
+                    row.append((p["weights"][alpha][idx] * len(U) / len(idx)) @ U[idx])
+            out.append(np.concatenate(row))
         return np.array(out)
 
     @staticmethod
@@ -339,6 +403,8 @@ class CHMMAggregation:
     # -- evaluation ------------------------------------------------------------------------------------------
 
     def _metric(self, name: str, y: np.ndarray, s: dict[str, np.ndarray]) -> float:
+        if name in CALIBRATION and s["prob"] is None:
+            return float("nan")
         if name == "ece":
             return expected_calibration_error(y, s["prob"], get_settings().evaluation.ece_bins)
         return METRICS[name](y, s["prob"] if name in CALIBRATION else s["rank"])
@@ -356,7 +422,7 @@ class CHMMAggregation:
             rows = np.concatenate([members[g] for g in rng.integers(0, len(uniq), len(uniq))])
             yb = y[rows]
             for i, m in enumerate(methods):
-                sb = {k: v[rows] for k, v in scores[m].items()}
+                sb = {k: None if v is None else v[rows] for k, v in scores[m].items()}
                 for j, k in enumerate(METRIC_NAMES):
                     if k != "auarc":
                         boot[b, i, j] = self._metric(k, yb, sb)
@@ -371,9 +437,9 @@ class CHMMAggregation:
             m: {k: {"value": point[m][k], "ci": interval(boot[:, i, j])} for j, k in enumerate(METRIC_NAMES)}
             for i, m in enumerate(methods)
         }
-        primary = chmm_method(c.primary_alpha)
+        primary = chmm_method(c.primary_alpha) if self.uses_chmm else "spn"
         comparisons = {}
-        for other in ("rms_spn", "rms_se", "rms_mcsp"):
+        for other in ("rms_spn", "rms_se", "rms_mcsp") if self.uses_chmm else ("rms_se", "rms_mcsp"):
             i, o = methods.index(primary), methods.index(other)
             comparisons[f"{primary}-{other}"] = {
                 k: {
@@ -416,22 +482,27 @@ class CHMMAggregation:
                         "split": p["split"],
                         "label": p["label"],
                         "t": t,
-                        **{k: s[k] for k in ("agent_id", "role", "round", "step_id", "metrics")},
+                        **{k: s[k] for k in ("agent_id", "role", "node", "round", "step_id", "metrics")},
+                    }
+                )
+                if self.uses_chmm:
+                    steps[-1] |= {
                         **s["distance"],
                         "gamma": dict(zip(STATE_NAMES, p["gamma"][t].tolist(), strict=True)),
                         "weights": {f"{a:g}": float(w[t]) for a, w in p["weights"].items()},
                     }
-                )
             row = {
                 "problem_id": p["problem_id"],
                 "split": p["split"],
                 "label": p["label"],
                 "responses": len(p["steps"]),
-                "features": {m: dict(zip(FEATURES, Z[m][i].tolist(), strict=True)) for m in Z},
+                "features": {m: dict(zip(self.feature_names, Z[m][i].tolist(), strict=True)) for m in Z},
                 "standalone_scores": {m: float(standalone[m][i]) for m in STANDALONE},
             }
             if i in test_pos:
-                row["p_incorrect"] = {m: float(s["prob"][test_pos[i]]) for m, s in scores.items()}
+                row["p_incorrect"] = {
+                    m: float(s["prob"][test_pos[i]]) for m, s in scores.items() if s["prob"] is not None
+                }
             features.append(row)
         self.store.write_jsonl(f"{self.out}/steps.jsonl", steps)
         self.store.write_json(f"{self.out}/features.json", features)
@@ -512,9 +583,9 @@ class CHMMAggregation:
         res = evaluation["methods"]
 
         def cell(m: str, k: str) -> str:
-            if m in STANDALONE and k in CALIBRATION:
-                return "—"
             v = res[m][k]
+            if (m in STANDALONE and k in CALIBRATION) or not np.isfinite(v["value"]):
+                return "—"
             return f"{v['value']:.4f} [{v['ci'][0]:.3f}, {v['ci'][1]:.3f}]"
 
         lines = [
@@ -528,8 +599,9 @@ class CHMMAggregation:
             "|---|---|---|---|" + "---|" * len(METRIC_NAMES),
         ]
         for m in res:
-            alpha = next((f"{a:g}" for a in self.config.alphas if chmm_method(a) == m), "—")
-            name = LABELS.get(m, "CHMM + SPN")
+            base = m.removesuffix("_entropy")
+            alpha = next((f"{a:g}" for a in self.config.alphas if chmm_method(a) == base), "—")
+            name = LABELS.get(base, "CHMM + SPN") + (" posterior entropy" if m != base else "")
             lines.append(
                 f"| {dataset} | {arch} | {name} | {alpha} | " + " | ".join(cell(m, k) for k in METRIC_NAMES) + " |"
             )
@@ -544,7 +616,9 @@ class CHMMAggregation:
             lines.append(f"| {LABELS[m]} | {cell_cal(res, m, 'brier')} | {cell_cal(res, m, 'ece')} |")
         lines += [
             "",
-            f"Paired differences, CHMM α={self.config.primary_alpha:g} + SPN minus baseline:",
+            "Paired differences, "
+            + (f"CHMM α={self.config.primary_alpha:g} + SPN" if self.uses_chmm else "SPN")
+            + " minus baseline:",
             "",
             "| Baseline | " + " | ".join(k.upper() for k in METRIC_NAMES) + " |",
             "|---|" + "---|" * len(METRIC_NAMES),
@@ -559,9 +633,19 @@ class CHMMAggregation:
             lines.append(f"| {LABELS[other]} | " + " | ".join(cells) + " |")
         lines += [
             "",
-            "† against the Platt-calibrated standalone score. p: share of resamples where the CHMM method "
+            "† against the Platt-calibrated standalone score. p: share of resamples where the SPN method "
             "is not better.",
             "",
+        ]
+        if self.uses_chmm:
+            lines += self._chmm_report(evaluation, diagnostics, hmm)
+        self.store.write_json(f"{self.out}/results_table.json", _table_rows(evaluation, dataset, arch, self.config))
+        self.store.path(f"{self.out}/results.md").write_text("\n".join(lines))
+        if self.uses_chmm:
+            self._plot(evaluation)
+
+    def _chmm_report(self, evaluation: dict[str, Any], diagnostics: dict[str, Any], hmm: dict[str, Any]) -> list[str]:
+        lines = [
             "## CHMM states (training fit, frozen; hmmlearn GaussianHMM, diagonal)",
             "",
             "| State | π | μ question drift | μ interaction gap | σ² drift | σ² gap | deviation |",
@@ -605,9 +689,7 @@ class CHMMAggregation:
             f"Checks: {evaluation['checks']}; λ: {evaluation['lambdas']}",
             "",
         ]
-        self.store.write_json(f"{self.out}/results_table.json", _table_rows(evaluation, dataset, arch, self.config))
-        self.store.path(f"{self.out}/results.md").write_text("\n".join(lines))
-        self._plot(evaluation)
+        return lines
 
     def _plot(self, evaluation: dict[str, Any]) -> None:
         import matplotlib  # noqa: PLC0415
@@ -645,7 +727,7 @@ def _table_rows(evaluation: dict[str, Any], dataset: str, arch: str, config: Any
     """The consolidated table as rows (standalone Brier/ECE are the calibrated ones, flagged)."""
     out = []
     for m, r in evaluation["methods"].items():
-        alpha = next((a for a in config.alphas if chmm_method(a) == m), None)
+        alpha = next((a for a in config.alphas if chmm_method(a) == m.removesuffix("_entropy")), None)
         out.append(
             {
                 "dataset": dataset,

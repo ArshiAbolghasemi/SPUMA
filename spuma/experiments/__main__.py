@@ -85,7 +85,7 @@ def write_comparison(names: list[str]) -> None:
     for r in rows:
         alpha = "—" if r["alpha"] is None else f"{r['alpha']:g}"
         values = [
-            "—" if r["calibration_metrics_from_platt"] and m in ("brier", "ece") else f"{r[m]:.4f}"
+            "—" if (r["calibration_metrics_from_platt"] and m in ("brier", "ece")) or r[m] != r[m] else f"{r[m]:.4f}"
             for m in METRIC_NAMES
         ]
         lines.append(

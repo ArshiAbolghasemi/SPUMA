@@ -32,8 +32,6 @@ class EvaluationConfig:
     bootstrap: BootstrapConfig = field(default_factory=BootstrapConfig)
 
     def __post_init__(self) -> None:
-        if not self.risk_models:
-            raise ValueError("evaluation.risk_models must name at least one model")
         for name in self.risk_models:
             check_choice("evaluation.risk_models[]", name, RISK_MODEL_NAMES)
         check_range("evaluation.ece_bins", self.ece_bins, gt=0)

@@ -132,6 +132,7 @@ def _config(config, tmp_path, backend="transformers", scoring="same", concurrent
     raw["experiment"]["concurrent_problems"] = concurrent
     raw["agents"]["max_rounds"] = ROUNDS
     raw["evaluation"]["bootstrap"]["iterations"] = 50
+    raw["evaluation"]["risk_models"] = ["spn"]  # the risk-model path (used by OOD evaluation)
     raw["spn"]["min_instances_slice"] = 20
     raw["model"]["backend"], raw["model"]["scoring_backend"] = backend, scoring
     return type(config).from_dict(raw)
@@ -304,7 +305,7 @@ def test_concurrent_problems_give_identical_results(config, set_settings, tmp_pa
 def test_star_pipeline_with_chmm(set_settings, tmp_path, fake_capabilities, monkeypatch):
     """Star: five measured calls per problem, 12 per-agent features, the risk models and all nine CHMM-study methods
     on the same trajectories; the final synthesis is the last step and the graded answer."""
-    from spuma.chmm.experiment import STANDALONE, CHMMAggregation, chmm_method  # noqa: PLC0415
+    from spuma.chmm.experiment import STANDALONE, CHMMAggregation  # noqa: PLC0415
     from spuma.config import PROJECT_ROOT, SETTINGS_FILE_ENV, get_settings  # noqa: PLC0415
 
     monkeypatch.setenv(SETTINGS_FILE_ENV, str(PROJECT_ROOT / "config" / "star" / "math_ma_qwen2_5_7b_star.yaml"))
@@ -334,12 +335,15 @@ def test_star_pipeline_with_chmm(set_settings, tmp_path, fake_capabilities, monk
         assert not any(references[s["problem_id"]] in m["content"] for m in s["input_messages"])
 
     summary = store.read_json("summary.json")
-    assert "spn" in summary["models"]
-    methods = [*STANDALONE, "rms_spn", *(chmm_method(a) for a in cfg.chmm.alphas)]
-    assert list(summary["chmm"]) == methods
+    assert list(summary["chmm"]) == [*STANDALONE, "spn", "spn_entropy"]  # star: one SPN, no RMS or CHMM weighting
+    assert len(cfg.chmm.alphas) and "chmm_a1_spn" not in summary["chmm"]
     out = CHMMAggregation(runner).out
     steps = store.read_jsonl(f"{out}/steps.jsonl")
     first = [s for s in steps if s["problem_id"] == feats[0]["problem_id"]]
     assert [s["agent_id"] for s in first] == ["star", "analyst", "star", "verifier", "star"]
-    assert [s["preceding"] for s in first] == [None, 0, 1, 2, 3]
-    assert sum(s["weights"]["1"] for s in first) == pytest.approx(1)
+    assert [s["node"] for s in first][-1] == "star_finalize" and "weights" not in first[0]  # no CHMM in star
+    row = next(r for r in store.read_json(f"{out}/features.json") if r["problem_id"] == feats[0]["problem_id"])
+    assert len(row["features"]["spn"]) == 20 and list(row["features"]["spn"])[:2] == [
+        "star_delegate_se",
+        "star_delegate_mcsp",
+    ]

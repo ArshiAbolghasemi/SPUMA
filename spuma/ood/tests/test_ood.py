@@ -37,6 +37,7 @@ def source(raw_config, tmp_path):
     raw["experiment"].update({"name": "id_math", "output_dir": str(tmp_path), "concurrent_problems": 1})
     raw["agents"]["max_rounds"] = 3
     raw["evaluation"]["bootstrap"]["iterations"] = 50
+    raw["evaluation"]["risk_models"] = ["spn"]  # the source checkpoint the OOD evaluation loads
     raw["spn"]["min_instances_slice"] = 20
     raw["model"]["backend"], raw["model"]["scoring_backend"] = "transformers", "same"
     path = tmp_path / "source.yaml"

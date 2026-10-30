@@ -103,8 +103,10 @@ def test_chmm_runs_in_the_experiment_and_evaluates_frozen(experiment):
     aggregation = CHMMAggregation(runner)
     out = runner.store.path(aggregation.out)
     ev = runner.store.read_json(f"{aggregation.out}/evaluation.json")
-    methods = [*STANDALONE, "rms_spn", *(chmm_method(a) for a in get_settings().chmm.alphas)]
+    spns = ["rms_spn", *(chmm_method(a) for a in get_settings().chmm.alphas)]
+    methods = [*STANDALONE, *(x for m in spns for x in (m, f"{m}_entropy"))]
     assert list(ev["methods"]) == methods and ev["frozen_from"] is None
+    assert np.isnan(ev["methods"]["rms_spn_entropy"]["brier"]["value"])  # entropy is a ranking score only
     assert set(runner.store.read_json("summary.json")["chmm"]) == set(methods)
     assert ev["checks"]["max_weight_sum_deviation"] < 1e-9
     assert ev["lambdas"] == {"0.5": [1.0, 1.5, 2.0], "1": [1.0, 2.0, 3.0], "2": [1.0, 3.0, 5.0], "4": [1.0, 5.0, 9.0]}
@@ -115,13 +117,14 @@ def test_chmm_runs_in_the_experiment_and_evaluates_frozen(experiment):
     for pid in {s["problem_id"] for s in steps}:
         assert sum(s["weights"]["1"] for s in steps if s["problem_id"] == pid) == pytest.approx(1)
     rows = runner.store.read_json(f"{aggregation.out}/features.json")
-    assert all(len(v) == 4 for r in rows for v in r["features"].values())
+    per_agent = [f"{g}_{m}" for g in ("solver", "reviewer") for m in ("se", "mcsp", "nll", "length")]
+    assert all(list(v) == per_agent for r in rows for v in r["features"].values())
 
     # evaluate never fits: the frozen CHMM, SPNs and calibrators give the same results
     before = {p.name: p.read_bytes() for p in (out / "models").iterdir()}
     again = aggregation.evaluate(frozen_from=out)
     assert {p.name: p.read_bytes() for p in (out / "models").iterdir()} == before
-    assert again["methods"] == ev["methods"]
+    assert json.dumps(again["methods"]) == json.dumps(ev["methods"])  # NaN-aware (entropy has no Brier/ECE)
 
 
 class EvalOnlyDataset:
@@ -165,14 +168,14 @@ def test_eval_only_dataset_skips_training_and_evaluates_the_frozen_source(experi
     d = runner.scored_dir()
     labels = [r["label"] for r in runner.store.read_json(f"{d}/features.json")]
     assert labels.count(None) == 2
-    assert runner.store.read_json(f"{d}/models/spn_status.json")["status"] == "skipped"
     aggregation = CHMMAggregation(runner)
     assert runner.store.read_json(f"{aggregation.out}/status.json")["status"] == "skipped"
     summary = runner.store.read_json("summary.json")
     assert "chmm" not in summary and list(summary["chmm_frozen"]) == ["src"]
     frozen = runner.store.read_json(f"{aggregation.out}/frozen-src/evaluation.json")
     assert frozen["n_test"] == 28 and frozen["frozen_from"] == str(source_dir)
-    assert set(frozen["methods"]) == {*STANDALONE, "rms_spn", *(chmm_method(a) for a in get_settings().chmm.alphas)}
+    spns = ["rms_spn", *(chmm_method(a) for a in get_settings().chmm.alphas)]
+    assert set(frozen["methods"]) == {*STANDALONE, *spns, *(f"{m}_entropy" for m in spns)}
     assert {p.name: p.read_bytes() for p in (source_dir / "models").iterdir()} == before
 
     from spuma.chmm.experiment import consolidate  # noqa: PLC0415
@@ -180,4 +183,47 @@ def test_eval_only_dataset_skips_training_and_evaluates_the_frozen_source(experi
     registry.EXPERIMENTS["target"] = Experiment("target", target_file)
     rows = consolidate(["src", "target"])
     assert {(r["experiment"], r["protocol"]) for r in rows} == {("src", "dataset_specific"), ("target", "frozen:src")}
-    assert len(rows) == 18
+    assert len(rows) == 28  # (4 standalone + 5 SPNs + their 5 entropies) x 2 protocols
+
+
+def test_feature_groups_aggregate_per_agent_per_response_or_pooled(monkeypatch):
+    import dataclasses  # noqa: PLC0415
+
+    from spuma.config import PROJECT_ROOT  # noqa: PLC0415
+
+    def problem(agents, nodes, values, weights):
+        steps = [
+            {"agent_index": a, "node": n, "metrics": dict(zip(("se", "mcsp", "nll", "length"), [v] * 4, strict=True))}
+            for a, n, v in zip(agents, nodes, values, strict=True)
+        ]
+        return {"steps": steps, "weights": {1.0: np.array(weights)}}
+
+    def aggregation(layout):
+        agg = CHMMAggregation.__new__(CHMMAggregation)
+        agg.config = dataclasses.replace(get_settings().chmm, feature_layout=layout)
+        return agg
+
+    # feedback loop, 2 rounds: solver says 1 then 3, reviewer 2 then 4
+    fb = problem([0, 1, 0, 1], [None] * 4, [1.0, 2.0, 3.0, 4.0], [0.1, 0.2, 0.3, 0.4])
+    agg = aggregation("per_agent")
+    assert agg.feature_names[:2] == ["solver_se", "solver_mcsp"] and len(agg.feature_names) == 8
+    rms = agg._aggregate([fb], "rms_spn")[0]
+    assert np.allclose(rms[[0, 4]], [np.sqrt((1 + 9) / 2), np.sqrt((4 + 16) / 2)])
+    chmm = agg._aggregate([fb], "chmm_a1_spn")[0]
+    assert np.allclose(chmm[[0, 4]], [(0.1 * 1 + 0.3 * 3) * 4 / 2, (0.2 * 2 + 0.4 * 4) * 4 / 2])
+    uniform = problem([0, 1, 0, 1], [None] * 4, [1.0, 2.0, 3.0, 4.0], [0.25] * 4)
+    assert np.allclose(agg._aggregate([uniform], "chmm_a1_spn")[0][[0, 4]], [2.0, 3.0])  # per-agent means
+    # pooled: the old single weighted mean over all responses
+    pooled = aggregation("pooled")
+    assert pooled.feature_names == ["se", "mcsp", "nll", "length"]
+    assert np.allclose(pooled._aggregate([fb], "chmm_a1_spn")[0][0], 0.1 + 0.4 + 0.9 + 1.6)
+
+    # star: every node on its own, scaled by its relative weight T * w_t
+    monkeypatch.setenv(SETTINGS_FILE_ENV, str(PROJECT_ROOT / "config" / "star" / "math_ma_qwen2_5_7b_star.yaml"))
+    get_settings.cache_clear()
+    nodes = ["star_delegate", "analyst", "star_request_verification", "verifier", "star_finalize"]
+    star = problem([0, 1, 0, 2, 0], nodes, [1.0, 2.0, 3.0, 4.0, 5.0], [0.1, 0.1, 0.2, 0.2, 0.4])
+    agg = aggregation("per_agent")
+    assert len(agg.feature_names) == 20 and agg.feature_names[0] == "star_delegate_se"
+    assert np.allclose(agg._aggregate([star], "rms_spn")[0][::4], [1, 2, 3, 4, 5])
+    assert np.allclose(agg._aggregate([star], "chmm_a1_spn")[0][::4], [0.5, 1.0, 3.0, 4.0, 10.0])

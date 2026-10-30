@@ -56,6 +56,9 @@ class CHMMConfig:
     hmm: HMMConfig = field(default_factory=HMMConfig)
     bootstrap_iterations: int = 10000
     confidence: float = 0.95
+    # SPN inputs: per_agent (feedback: each agent's responses aggregated; star/sequential: each response on its
+    # own) or pooled (all responses aggregated into one [SE, MCSP, NLL, length])
+    feature_layout: str = "per_agent"
     # registered experiments (same architecture, e.g. the MATH one) whose trained CHMM, calibrators and SPNs are
     # also evaluated here, frozen: nothing is fitted on this dataset's labels (frozen OOD protocol)
     frozen_from: list[str] = field(default_factory=list)
@@ -67,5 +70,6 @@ class CHMMConfig:
             raise ValueError("chmm.alphas must be > 0 (alpha = 0, uniform weights, is a unit test, not an experiment)")
         if self.primary_alpha not in self.alphas:
             raise ValueError(f"chmm.primary_alpha {self.primary_alpha} must be one of chmm.alphas {self.alphas}")
+        check_choice("chmm.feature_layout", self.feature_layout, ("per_agent", "pooled"))
         check_range("chmm.bootstrap_iterations", self.bootstrap_iterations, gt=0)
         check_range("chmm.confidence", self.confidence, gt=0.0, lt=1.0)
