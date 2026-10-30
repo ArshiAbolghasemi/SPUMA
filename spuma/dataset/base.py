@@ -11,6 +11,7 @@ only to `Problem.reference_solution` / `Problem.metadata["grading"]`, which grad
 
 import logging
 import random
+import re
 import string
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import asdict, dataclass, field, replace
@@ -107,6 +108,15 @@ class AnswerGrader(Protocol):
 def normalize(text: str) -> str:
     """Whitespace-collapsed, lower-cased text."""
     return " ".join(text.split()).lower()
+
+
+ARTICLES_RE = re.compile(r"\b(a|an|the)\b")
+
+
+def normalize_answer(text: str) -> str:
+    """SQuAD-style answer normalization: lower case, no punctuation or articles, collapsed whitespace."""
+    text = "".join(ch for ch in text.lower() if ch not in string.punctuation)
+    return " ".join(ARTICLES_RE.sub(" ", text).split())
 
 
 def load_hf_rows(

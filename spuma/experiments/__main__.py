@@ -16,6 +16,7 @@ import json
 import logging
 import sys
 
+from spuma.chmm.experiment import METRIC_NAMES, consolidate
 from spuma.config import PROJECT_ROOT
 from spuma.experiments.registry import ARCHITECTURES, EXPERIMENTS
 from spuma.experiments.runner import PHASES
@@ -77,8 +78,6 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def write_comparison(names: list[str]) -> None:
-    from spuma.chmm.experiment import METRIC_NAMES, consolidate  # noqa: PLC0415
-
     rows = consolidate(names)
     head = ["Dataset", "Architecture", "Protocol", "Method", "Alpha", *(m.upper() for m in METRIC_NAMES)]
     lines = ["| " + " | ".join(head) + " |", "|" + "---|" * len(head)]

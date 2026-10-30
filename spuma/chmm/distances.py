@@ -35,6 +35,9 @@ import string
 from collections.abc import Callable
 from typing import Any, Protocol
 
+import torch
+from transformers import AutoModelForQuestionAnswering, AutoTokenizer
+
 from spuma.chmm.config import DistanceConfig
 
 logger = logging.getLogger(__name__)
@@ -88,11 +91,7 @@ class QADistance:
     """Extractive QA (SQuAD 2.0) over sliding windows of each response; see the module docstring."""
 
     def __init__(self, config: DistanceConfig) -> None:
-        import torch  # noqa: PLC0415 - heavy, only when this estimator is used
-        from transformers import AutoModelForQuestionAnswering, AutoTokenizer  # noqa: PLC0415
-
         self.config = config
-        self.torch = torch
         device = config.device or (
             "mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu"
         )
@@ -107,7 +106,7 @@ class QADistance:
         return self.tokenizer.decode(ids)
 
     def read(self, question: str, texts: list[str]) -> list[dict[str, Any]]:
-        c, torch = self.config, self.torch
+        c = self.config
         q = self._question(question)
         enc = self.tokenizer(
             [q] * len(texts),

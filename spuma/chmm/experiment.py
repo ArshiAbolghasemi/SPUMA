@@ -44,6 +44,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from matplotlib.figure import Figure
 from scipy.stats import spearmanr
 from sklearn.linear_model import LogisticRegression
 
@@ -55,6 +56,7 @@ from spuma.common.config import to_plain
 from spuma.common.logs import progress
 from spuma.common.utils import safe_name, stable_hash
 from spuma.config import PROJECT_ROOT, get_settings
+from spuma.config.settings import load_settings
 from spuma.dataset.math.answers import extract_boxed
 from spuma.evaluation.metrics import METRICS, binary_entropy, expected_calibration_error
 from spuma.spn.model import JointSPN
@@ -121,15 +123,17 @@ def chmm_fingerprint(config: Any) -> str:
     return stable_hash(plain)
 
 
-def trained_dir(experiment_name: str) -> tuple[Path, Any]:
-    """(trained CHMM directory, `chmm:` settings) of a registered experiment, from its own settings file (not the
-    active one)."""
-    from spuma.config.settings import load_settings  # noqa: PLC0415 - avoids an import cycle with the runner
-    from spuma.experiments.registry import EXPERIMENTS  # noqa: PLC0415
+def experiment_config(experiment_name: str) -> Path:
+    """The settings file of an experiment: `config/<architecture>/<experiment name>.yaml`."""
+    found = sorted((PROJECT_ROOT / "config").glob(f"*/{experiment_name}.yaml"))
+    if len(found) != 1:
+        raise ValueError(f"chmm.frozen_from: no single settings file for experiment {experiment_name!r}: {found}")
+    return found[0]
 
-    if experiment_name not in EXPERIMENTS:
-        raise ValueError(f"chmm.frozen_from: {experiment_name!r} is not a registered experiment")
-    s = load_settings([EXPERIMENTS[experiment_name].config_file])
+
+def trained_dir(experiment_name: str) -> tuple[Path, Any]:
+    """(trained CHMM directory, `chmm:` settings) of an experiment, from its own settings file (not the active one)."""
+    s = load_settings([experiment_config(experiment_name)])
     scored = f"generation-{s.generation_fingerprint()}/scored-{s.scoring_fingerprint()}"
     root = s.experiment.output_dir if s.experiment.output_dir.is_absolute() else PROJECT_ROOT / s.experiment.output_dir
     return root / s.experiment.name / scored / f"chmm-{chmm_fingerprint(s.chmm)}", s.chmm
@@ -692,13 +696,9 @@ class CHMMAggregation:
         return lines
 
     def _plot(self, evaluation: dict[str, Any]) -> None:
-        import matplotlib  # noqa: PLC0415
-
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt  # noqa: PLC0415
-
         res, alphas = evaluation["methods"], self.config.alphas
-        fig, axes = plt.subplots(1, 2, figsize=(9, 3.4), constrained_layout=True)
+        fig = Figure(figsize=(9, 3.4), constrained_layout=True)
+        axes = fig.subplots(1, 2)
         for ax, k in zip(axes, ("auroc", "auarc"), strict=True):
             v = np.array([res[chmm_method(a)][k]["value"] for a in alphas])
             ci = np.array([res[chmm_method(a)][k]["ci"] for a in alphas])
@@ -715,7 +715,6 @@ class CHMMAggregation:
             ax.tick_params(colors="#52514e")
         axes[0].legend(frameon=False, fontsize=9)
         fig.savefig(self.store.path(f"{self.out}/alpha.png"), dpi=160)
-        plt.close(fig)
 
 
 def cell_cal(res: dict[str, Any], m: str, k: str) -> str:

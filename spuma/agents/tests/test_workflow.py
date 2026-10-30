@@ -4,7 +4,7 @@ import json
 import pytest
 
 from spuma.agents.workflow import FeedbackWorkflow, MultiAgentWorkflow, build_workflow
-from spuma.config import Settings
+from spuma.config import PROJECT_ROOT, SETTINGS_FILE_ENV, Settings, get_settings
 
 A1, A2, A3 = "2x = 4, so \\boxed{2}", "Subtract 3: 2x = 4, so \\boxed{2}", "Indeed \\boxed{2}"
 B1, B2 = "Why is 2x = 4?", "Can you justify the subtraction?"
@@ -161,8 +161,6 @@ def test_feedback_workflow_needs_two_agents(raw_config):
 
 
 def _sequential_settings(monkeypatch):
-    from spuma.config import PROJECT_ROOT, SETTINGS_FILE_ENV, get_settings  # noqa: PLC0415
-
     path = PROJECT_ROOT / "config" / "sequential" / "math_ma_qwen2_5_7b_sequential.yaml"
     monkeypatch.setenv(SETTINGS_FILE_ENV, str(path))
     get_settings.cache_clear()
@@ -194,8 +192,6 @@ def test_sequential_without_completion_token_still_ends_after_the_finalizer(monk
 
 
 def _qa_feedback_settings(monkeypatch):
-    from spuma.config import PROJECT_ROOT, SETTINGS_FILE_ENV, get_settings  # noqa: PLC0415
-
     path = PROJECT_ROOT / "config" / "feedbackloop" / "mmlu_ma_qwen2_5_7b_feedbackloop.yaml"
     monkeypatch.setenv(SETTINGS_FILE_ENV, str(path))
     get_settings.cache_clear()
@@ -215,8 +211,6 @@ def test_reviewer_cannot_end_the_loop_while_reporting_an_error(monkeypatch, scri
 
 def test_qa_reviewer_prompt_reviews_rather_than_answers(monkeypatch):
     _qa_feedback_settings(monkeypatch)
-    from spuma.config import get_settings  # noqa: PLC0415
-
     solver, reviewer = get_settings().agents.enabled
     assert "FINAL ANSWER FORMAT" in solver.system_prompt and "FINAL ANSWER FORMAT" not in reviewer.system_prompt
     assert "only\ntogether with VERDICT: CORRECT" in reviewer.system_prompt

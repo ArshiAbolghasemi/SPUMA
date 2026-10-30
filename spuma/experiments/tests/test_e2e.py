@@ -8,7 +8,9 @@ import re
 
 import pytest
 
+from spuma.chmm.experiment import STANDALONE, CHMMAggregation
 from spuma.common.config import to_plain
+from spuma.config import PROJECT_ROOT, SETTINGS_FILE_ENV, get_settings
 from spuma.dataset.base import Problem
 from spuma.experiments.runner import ExperimentRunner
 from spuma.models.backend import BackendCapabilityError, BackendInfo, GenerationResult, TokenScores, scorer_id
@@ -305,9 +307,6 @@ def test_concurrent_problems_give_identical_results(config, set_settings, tmp_pa
 def test_star_pipeline_with_chmm(set_settings, tmp_path, fake_capabilities, monkeypatch):
     """Star: five measured calls per problem, 12 per-agent features, the risk models and all nine CHMM-study methods
     on the same trajectories; the final synthesis is the last step and the graded answer."""
-    from spuma.chmm.experiment import STANDALONE, CHMMAggregation  # noqa: PLC0415
-    from spuma.config import PROJECT_ROOT, SETTINGS_FILE_ENV, get_settings  # noqa: PLC0415
-
     monkeypatch.setenv(SETTINGS_FILE_ENV, str(PROJECT_ROOT / "config" / "star" / "math_ma_qwen2_5_7b_star.yaml"))
     get_settings.cache_clear()
     cfg = set_settings(_config(get_settings(), tmp_path))

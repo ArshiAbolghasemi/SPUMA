@@ -12,8 +12,7 @@ import logging
 import re
 from collections.abc import Callable
 
-from spuma.dataset.base import Grade, Problem
-from spuma.dataset.morehopqa.grading import normalize_answer
+from spuma.dataset.base import Grade, Problem, normalize_answer
 
 logger = logging.getLogger(__name__)
 

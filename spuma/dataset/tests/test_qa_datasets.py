@@ -9,6 +9,7 @@ import pytest
 from spuma.config import PROJECT_ROOT, SETTINGS_FILE_ENV, get_settings
 from spuma.dataset.base import Problem
 from spuma.dataset.mmlu import MMLUDataset, MMLUGrader
+from spuma.dataset.mmlu import loader as mmlu
 from spuma.dataset.morehopqa import MoreHopQADataset, MoreHopQAGrader
 from spuma.dataset.musique import MuSiQueDataset, MuSiQueGrader
 from spuma.dataset.qa import any_answer, final_answer, is_insufficient, option_letter
@@ -171,8 +172,6 @@ def test_every_architecture_selects_the_same_problems(monkeypatch, dataset):
 
 def test_load_dataset_adapter_returns_standardized_examples(monkeypatch):
     config = _settings(monkeypatch, "mmlu", train_samples=4, validation_samples=2, test_samples=3)
-    import spuma.dataset.mmlu.loader as mmlu  # noqa: PLC0415
-
     monkeypatch.setattr(mmlu, "_load_parquet", mmlu_loader)
     test = load_dataset_adapter("mmlu", "test", config, seed=7)
     assert len(test) == 3 and set(test[0]) == {

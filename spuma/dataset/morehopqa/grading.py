@@ -12,19 +12,18 @@ Label Y = 1 if the answer is incorrect.
 
 import logging
 import re
-import string
 from datetime import datetime
 
 from dateutil import parser as date_parser
 from math_verify import parse, verify
 
-from spuma.dataset.base import Grade, Problem
+from spuma.dataset.base import Grade, Problem, normalize_answer
 from spuma.dataset.math.answers import extract_boxed
+from spuma.dataset.qa import final_answer
 
 logger = logging.getLogger(__name__)
 
 TEXT_WRAPPER_RE = re.compile(r"\\(?:text|textbf|mathrm|mathbf|operatorname)\{([^{}]*)\}")
-ARTICLES_RE = re.compile(r"\b(a|an|the)\b")
 
 
 def clean(answer: str) -> str:
@@ -33,11 +32,6 @@ def clean(answer: str) -> str:
     while previous != answer:
         previous, answer = answer, TEXT_WRAPPER_RE.sub(r"\1", answer)
     return answer.replace("$", "").strip().strip("\"'").strip()
-
-
-def normalize_answer(text: str) -> str:
-    text = "".join(ch for ch in text.lower() if ch not in string.punctuation)
-    return " ".join(ARTICLES_RE.sub(" ", text).split())
 
 
 def _number(text: str) -> float | None:
@@ -85,8 +79,6 @@ class MoreHopQAGrader:
     def grade(self, problem: Problem, final_text: str) -> Grade:
         boxed = extract_boxed(final_text)
         if boxed is None:
-            from spuma.dataset.qa import final_answer  # noqa: PLC0415 - qa imports this module
-
             boxed = final_answer(final_text)
         predicted = clean(boxed) if boxed is not None else None
         reference = problem.reference_solution

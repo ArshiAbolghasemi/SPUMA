@@ -1,3 +1,4 @@
+import dataclasses
 import json
 import os
 
@@ -5,11 +6,12 @@ import numpy as np
 import pytest
 import yaml
 
+from spuma.chmm import experiment as chmm_experiment
 from spuma.chmm.config import CHMMConfig, DistanceConfig, HMMConfig
 from spuma.chmm.distances import LexicalDistance, preceding, situational_distances, token_f1
 from spuma.chmm.experiment import STANDALONE, CHMMAggregation, chmm_method
 from spuma.chmm.hmm import SituationalHMM, state_coefficients, step_weights
-from spuma.config import SETTINGS_FILE_ENV, get_settings
+from spuma.config import PROJECT_ROOT, SETTINGS_FILE_ENV, get_settings
 from spuma.dataset.base import Problem
 from spuma.experiments.runner import ExperimentRunner
 from spuma.experiments.tests.test_e2e import Engines, FakeDataset, fake_capabilities  # noqa: F401
@@ -144,12 +146,10 @@ class EvalOnlyDataset:
 
 
 def test_eval_only_dataset_skips_training_and_evaluates_the_frozen_source(experiment, tmp_path, monkeypatch):
-    from spuma.experiments import registry  # noqa: PLC0415
-    from spuma.experiments.base import Experiment  # noqa: PLC0415
-
     source_runner = experiment
     source_file = tmp_path / "source.yaml"
-    monkeypatch.setattr(registry, "EXPERIMENTS", {"src": Experiment("src", source_file)})
+    configs = {"src": source_file}
+    monkeypatch.setattr(chmm_experiment, "experiment_config", configs.__getitem__)
     source_dir = source_runner.store.path(CHMMAggregation(source_runner).out)
     before = {p.name: p.read_bytes() for p in (source_dir / "models").iterdir()}
 
@@ -178,19 +178,13 @@ def test_eval_only_dataset_skips_training_and_evaluates_the_frozen_source(experi
     assert set(frozen["methods"]) == {*STANDALONE, *spns, *(f"{m}_entropy" for m in spns)}
     assert {p.name: p.read_bytes() for p in (source_dir / "models").iterdir()} == before
 
-    from spuma.chmm.experiment import consolidate  # noqa: PLC0415
-
-    registry.EXPERIMENTS["target"] = Experiment("target", target_file)
-    rows = consolidate(["src", "target"])
+    configs["target"] = target_file
+    rows = chmm_experiment.consolidate(["src", "target"])
     assert {(r["experiment"], r["protocol"]) for r in rows} == {("src", "dataset_specific"), ("target", "frozen:src")}
     assert len(rows) == 28  # (4 standalone + 5 SPNs + their 5 entropies) x 2 protocols
 
 
 def test_feature_groups_aggregate_per_agent_per_response_or_pooled(monkeypatch):
-    import dataclasses  # noqa: PLC0415
-
-    from spuma.config import PROJECT_ROOT  # noqa: PLC0415
-
     def problem(agents, nodes, values, weights):
         steps = [
             {"agent_index": a, "node": n, "metrics": dict(zip(("se", "mcsp", "nll", "length"), [v] * 4, strict=True))}
