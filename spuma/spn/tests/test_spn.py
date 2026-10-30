@@ -4,7 +4,6 @@ import inspect
 import numpy as np
 import pytest
 import torch
-from scipy.stats import norm
 from spflow.meta.data.scope import Scope
 from spflow.modules.ops.cat import Cat
 from spflow.modules.products import Product
@@ -13,9 +12,8 @@ from spflow.modules.sums import Sum
 from spuma.evaluation.metrics import binary_entropy
 from spuma.spn.config import HistogramConfig
 from spuma.spn.leaves import BinaryIndicatorLeaf, HistogramLeaf, LeafSettings, histogram_edges, leaf_settings
-from spuma.spn.model import ClassConditionalSPN, JointSPN, partition_keeping_label, partition_with_constants
+from spuma.spn.model import JointSPN, partition_keeping_label, partition_with_constants
 
-MODELS = (JointSPN, ClassConditionalSPN)
 NAN = float("nan")
 
 
@@ -28,11 +26,11 @@ def _synthetic(n=400, seed=0):
 
 @pytest.fixture
 def make_spn(config, set_settings):
-    """An SPN of class `cls` built from the settings, with these `spn:` overrides installed."""
+    """A joint SPN built from the settings, with these `spn:` overrides installed."""
 
-    def make(cls=JointSPN, **spn):
+    def make(**spn):
         set_settings(dataclasses.replace(config, spn=dataclasses.replace(config.spn, **spn)))
-        return cls()
+        return JointSPN()
 
     return make
 
@@ -40,7 +38,7 @@ def make_spn(config, set_settings):
 @pytest.fixture(params=["histogram", "normal", "laplace"])
 def fitted(request, make_spn):
     Z, y = _synthetic()
-    return make_spn(JointSPN, leaf=request.param).fit(Z, y), Z, y
+    return make_spn(leaf=request.param).fit(Z, y), Z, y
 
 
 def _settings(**edges):
@@ -115,7 +113,7 @@ def _children(module):
 def test_joint_structure_is_valid_and_covers_the_label(make_spn):
     Z, y = _synthetic(600, seed=1)
     Z[:, 1] = Z[:, 0] + 0.1 * np.random.default_rng(2).normal(size=len(Z))
-    model = make_spn(JointSPN, min_instances_slice=50).fit(Z, y)
+    model = make_spn(min_instances_slice=50).fit(Z, y)
     assert set(model.root.scope.query) == set(range(9))
     sums = products = 0
     for m in model.root.modules():
@@ -160,7 +158,7 @@ def test_feature_marginalization_and_prior(fitted):
 
 def test_joint_density_integrates_to_one(make_spn):
     Z, y = _synthetic(400, seed=4)
-    model = make_spn(JointSPN, leaf="normal", min_instances_slice=100).fit(Z, y)
+    model = make_spn(leaf="normal", min_instances_slice=100).fit(Z, y)
     grid = np.linspace(-60, 60, 240001)
     Zg = np.full((len(grid), 8), np.nan)
     Zg[:, 0] = grid * model.std[0] + model.mean[0]
@@ -171,7 +169,7 @@ def test_joint_density_integrates_to_one(make_spn):
 def test_no_label_leakage_at_inference(make_spn):
     Z, y = _synthetic(400, seed=5)
     Z[1], y[0], y[1] = Z[0], 0, 1
-    model = make_spn(JointSPN).fit(Z, y)
+    model = make_spn().fit(Z, y)
     for fn in (model.predict_error_proba, model.posterior_entropy, model.log_joint):
         assert "y" not in inspect.signature(fn).parameters
     p = model.predict_error_proba(Z[:2])
@@ -180,57 +178,40 @@ def test_no_label_leakage_at_inference(make_spn):
     assert np.allclose(model.predict_error_proba(Z[shuffled]), model.predict_error_proba(Z)[shuffled])
 
 
-@pytest.mark.parametrize("cls", MODELS)
-def test_posterior_normalizes(make_spn, cls):
+def test_posterior_normalizes(make_spn):
     Z, y = _synthetic()
-    model = make_spn(cls).fit(Z, y)
+    model = make_spn().fit(Z, y)
     lj = model.log_joint(Z[:10])
     post = np.exp(lj - np.logaddexp(lj[:, :1], lj[:, 1:]))
     assert np.allclose(post.sum(1), 1.0)
 
 
-def test_class_conditional_matches_analytic_naive_bayes(make_spn):
-    Z, y = _synthetic()
-    model = make_spn(ClassConditionalSPN, leaf="normal", min_instances_slice=1000).fit(Z, y)
-    Zs = (Z - model.mean) / model.std
-    ll = []
-    for c in (0, 1):
-        d = Zs[y == c]
-        ll.append(norm.logpdf(Zs[:5], d.mean(0), d.std(0, ddof=1)).sum(1))
-    lj = np.stack(ll, 1) + model.log_prior_
-    expected = np.exp(lj[:, 1] - np.logaddexp(lj[:, 0], lj[:, 1]))
-    assert np.allclose(model.predict_error_proba(Z[:5]), expected, atol=1e-6)
-
-
-@pytest.mark.parametrize("cls", MODELS)
 @pytest.mark.parametrize("leaf", ["histogram", "normal"])
-def test_serialization_round_trip(tmp_path, make_spn, config, cls, leaf):
+def test_serialization_round_trip(tmp_path, make_spn, config, leaf):
     Z, y = _synthetic(600, seed=1)
-    model = make_spn(cls, leaf=leaf).fit(Z, y)
+    model = make_spn(leaf=leaf).fit(Z, y)
     p = model.predict_error_proba(Z[:20])
     model.save(tmp_path / "spn.pt")
-    loaded = cls.load(tmp_path / "spn.pt")
+    loaded = JointSPN.load(tmp_path / "spn.pt")
     assert np.allclose(loaded.predict_error_proba(Z[:20]), p)
     assert loaded.feature_names == config.features.order and loaded.config.leaf == leaf
-    other = JointSPN if cls is ClassConditionalSPN else ClassConditionalSPN
-    with pytest.raises(ValueError, match="checkpoint holds"):
-        other.load(tmp_path / "spn.pt")
+    torch.save({"kind": "class_conditional"}, tmp_path / "old.pt")
+    with pytest.raises(ValueError, match="class_conditional SPN, not a joint SPN"):
+        JointSPN.load(tmp_path / "old.pt")
 
 
-@pytest.mark.parametrize("cls", MODELS)
-def test_requires_both_classes(make_spn, cls):
+def test_requires_both_classes(make_spn):
     Z, _ = _synthetic(20)
     with pytest.raises(ValueError):
-        make_spn(cls).fit(Z, np.zeros(20, dtype=int))
+        make_spn().fit(Z, np.zeros(20, dtype=int))
 
 
-@pytest.mark.parametrize("cls", MODELS)
 @pytest.mark.parametrize("leaf", ["histogram", "normal"])
-def test_constant_features_do_not_break_structure_learning(make_spn, cls, leaf):
+def test_constant_features_do_not_break_structure_learning(make_spn, leaf):
     Z, y = _synthetic(300, seed=3)
     Z[:, 5] = 0.0
     Z[y == 1, 6] = 1.0
-    model = make_spn(cls, leaf=leaf, min_instances_slice=30).fit(Z, y)
+    model = make_spn(leaf=leaf, min_instances_slice=30).fit(Z, y)
     assert np.isfinite(model.predict_error_proba(Z)).all()
 
 

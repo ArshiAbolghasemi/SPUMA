@@ -182,7 +182,7 @@ def test_full_pipeline(config, set_settings, tmp_path, fake_capabilities):
     assert summary["n"] == 30 and 0 < summary["accuracy"] < 1
     assert summary["models"]["spn"]["auroc"] > 0.9
     assert summary["models"]["spn"]["auarc"] > summary["accuracy"]
-    names = {"spn", "spn_class_conditional"}
+    names = {"spn"}
     assert set(summary["models"]) == names | {f"{n}_posterior_entropy" for n in names}
 
     d = runner.scored_dir()
@@ -334,7 +334,7 @@ def test_star_pipeline_with_chmm(set_settings, tmp_path, fake_capabilities, monk
         assert not any(references[s["problem_id"]] in m["content"] for m in s["input_messages"])
 
     summary = store.read_json("summary.json")
-    assert {"spn", "spn_class_conditional"} <= set(summary["models"])
+    assert "spn" in summary["models"]
     methods = [*STANDALONE, "rms_spn", *(chmm_method(a) for a in cfg.chmm.alphas)]
     assert list(summary["chmm"]) == methods
     out = CHMMAggregation(runner).out

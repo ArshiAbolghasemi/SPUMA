@@ -9,9 +9,8 @@ the network polynomial gives every joint and marginal query exactly:
     U_SPUMA(Z)    = P(Y=1 | Z) = exp(log P(Z,1) − logsumexp_c log P(Z,c))     (predicted error risk)
     H(Y | Z)      = −p log p − (1−p) log(1−p)                                 (reported separately)
 
-`ClassConditionalSPN` (risk model `spn_class_conditional`) is the earlier baseline: P(Y) · P(Z | Y) with one
-LearnSPN density per class. Both use the same continuous leaves (`spn.leaf`) and log-space inference;
-features given as NaN (or listed in `marginalize`) are integrated out exactly.
+Leaves are continuous (`spn.leaf`) and inference is in log space; features given as NaN (or listed in
+`marginalize`) are integrated out exactly.
 """
 
 import io
@@ -100,10 +99,10 @@ def structure_stats(root: Any) -> dict[str, int]:
     }
 
 
-class _SPN:
-    """Shared parts: settings, standardization, leaf settings, LearnSPN call, checkpointing."""
+class JointSPN:
+    """One SPN over (Z, Y); Y is variable index len(Z) with indicator leaves."""
 
-    kind = ""
+    kind = "joint"
 
     def __init__(self) -> None:
         settings = get_settings()
@@ -114,6 +113,7 @@ class _SPN:
         self.feature_names = list(feature_names)
         self.mean = np.zeros(len(feature_names))
         self.std = np.ones(len(feature_names))
+        self.root: Any = None
 
     def _standardize(self, Z: np.ndarray) -> torch.Tensor:
         Z = np.asarray(Z, dtype=np.float64)
@@ -163,9 +163,6 @@ class _SPN:
     def _feature_leaf(self, n_features: int) -> Any:
         return CONTINUOUS_LEAVES[self.config.leaf](scope=Scope(list(range(n_features))), out_channels=1)
 
-    def log_joint(self, Z: np.ndarray, marginalize: list[str] | None = None) -> np.ndarray:
-        raise NotImplementedError
-
     def predict_error_proba(self, Z: np.ndarray, marginalize: list[str] | None = None) -> np.ndarray:
         lj = self.log_joint(Z, marginalize)
         return np.exp(lj[:, 1] - np.logaddexp(lj[:, 0], lj[:, 1]))
@@ -173,14 +170,15 @@ class _SPN:
     def posterior_entropy(self, Z: np.ndarray, marginalize: list[str] | None = None) -> np.ndarray:
         return binary_entropy(self.predict_error_proba(Z, marginalize))
 
-    def _state(self) -> dict[str, Any]:
-        return {"kind": self.kind, "config": to_plain(self.config), "feature_names": self.feature_names}
-
-    def _restore(self, state: dict[str, Any]) -> None:
-        raise NotImplementedError
-
     def save(self, path: Path) -> None:
-        state = {**self._state(), "mean": self.mean, "std": self.std}
+        state = {
+            "kind": self.kind,
+            "config": to_plain(self.config),
+            "feature_names": self.feature_names,
+            "mean": self.mean,
+            "std": self.std,
+            "root": self.root,
+        }
         path.parent.mkdir(parents=True, exist_ok=True)
         torch.save(state, path)
 
@@ -188,24 +186,11 @@ class _SPN:
     def load(cls, path: Path | io.BytesIO) -> Self:
         state = torch.load(path, weights_only=False)
         if state.get("kind") != cls.kind:
-            raise ValueError(
-                f"checkpoint holds a {state.get('kind') or 'class_conditional (old format)'} SPN, not {cls.kind}"
-            )
+            raise ValueError(f"checkpoint holds a {state.get('kind') or 'class-conditional'} SPN, not a joint SPN")
         model = cls.__new__(cls)
         model._init(build_config(SPNConfig, state["config"]), state["feature_names"])
-        model.mean, model.std = state["mean"], state["std"]
-        model._restore(state)
+        model.mean, model.std, model.root = state["mean"], state["std"], state["root"]
         return model
-
-
-class JointSPN(_SPN):
-    """One SPN over (Z, Y); Y is variable index len(Z) with indicator leaves."""
-
-    kind = "joint"
-
-    def _init(self, config: SPNConfig, feature_names: list[str]) -> None:
-        super()._init(config, feature_names)
-        self.root: Any = None
 
     @property
     def label_index(self) -> int:
@@ -273,63 +258,3 @@ class JointSPN(_SPN):
             "features": self.feature_names,
             **structure_stats(self.root),
         }
-
-    def _state(self) -> dict[str, Any]:
-        return {**super()._state(), "root": self.root}
-
-    def _restore(self, state: dict[str, Any]) -> None:
-        self.root = state["root"]
-
-
-class ClassConditionalSPN(_SPN):
-    """Baseline: P(Z, Y=c) = P(Y=c) · SPN_c(Z), one LearnSPN density per class."""
-
-    kind = "class_conditional"
-
-    def _init(self, config: SPNConfig, feature_names: list[str]) -> None:
-        super()._init(config, feature_names)
-        self.spns: dict[int, Any] = {}
-        self.log_prior_ = np.zeros(2)
-
-    def fit(self, Z: np.ndarray, y: np.ndarray) -> Self:
-        data, counts, settings = self._prepare(Z, y)
-        y = np.asarray(y, dtype=int)
-        a = self.config.prior_smoothing
-        self.log_prior_ = np.log((counts + a) / (counts.sum() + 2 * a))
-        torch.manual_seed(self.config.seed)
-        prev = torch.get_default_dtype()
-        torch.set_default_dtype(torch.float64)
-        try:
-            with leaf_settings(settings):
-                for c in (0, 1):
-                    self.spns[c] = self._learn(data[torch.from_numpy(y == c)], [self._feature_leaf(data.shape[1])])
-        finally:
-            torch.set_default_dtype(prev)
-        logger.info(
-            "class-conditional SPN trained",
-            extra={"class_counts": counts.tolist(), "log_prior": self.log_prior_.tolist(), "leaf": self.config.leaf},
-        )
-        return self
-
-    @torch.no_grad()
-    def log_joint(self, Z: np.ndarray, marginalize: list[str] | None = None) -> np.ndarray:
-        """(n, 2) array of log P(Z, Y=c)."""
-        if not self.spns:
-            raise RuntimeError("SPN is not fitted")
-        data = self._features(Z, marginalize)
-        cols = [self.spns[c].log_likelihood(data).reshape(len(data), -1)[:, 0].numpy() for c in (0, 1)]
-        return np.stack(cols, axis=1) + self.log_prior_
-
-    def summary(self) -> dict[str, Any]:
-        return {
-            "model": self.kind,
-            "log_prior": self.log_prior_.tolist(),
-            "leaf": self.config.leaf,
-            "features": self.feature_names,
-        }
-
-    def _state(self) -> dict[str, Any]:
-        return {**super()._state(), "spns": self.spns, "log_prior": self.log_prior_}
-
-    def _restore(self, state: dict[str, Any]) -> None:
-        self.spns, self.log_prior_ = state["spns"], state["log_prior"]

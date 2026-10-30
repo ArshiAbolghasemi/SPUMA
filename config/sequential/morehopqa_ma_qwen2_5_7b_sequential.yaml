@@ -177,7 +177,6 @@ evaluation:
   ece_bins: 15
   risk_models:
     - spn
-    - spn_class_conditional
 
   bootstrap:
     enabled: true

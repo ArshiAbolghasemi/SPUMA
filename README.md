@@ -51,7 +51,7 @@ Phases run in order and can be selected with `--phase` (repeatable):
 |---|---|---|
 | `generate` | runs the agents on every problem; draws the semantic-entropy samples | GPU (vLLM or Transformers) |
 | `score` | per-step PE/NLL (teacher forcing) and semantic entropy; writes the features | GPU + the NLI model |
-| `train` | trains the risk models (joint SPN, class-conditional baseline) | CPU |
+| `train` | trains the risk models (joint SPN) | CPU |
 | `evaluate` | AUROC, AUARC, ECE, ... with bootstrap intervals on validation/test | CPU |
 
 Re-use saved work instead of recomputing it:
