@@ -4,9 +4,11 @@ solves, the second asks and gives feedback:
     START -> mathematician -> uq_mathematician -> enthusiast -> uq_enthusiast -> (mathematician | END)
 
 The loop ends when the second agent's response contains `agents.completion_token` (deterministic substring
-match) or after `agents.max_rounds` rounds; one round is one response from each agent.
+match) and, if set, also matches `agents.completion_requires` (e.g. `VERDICT: CORRECT`, so a reviewer that finds an
+error cannot end the loop), or after `agents.max_rounds` rounds; one round is one response from each agent.
 """
 
+import re
 from typing import Any
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
@@ -27,10 +29,12 @@ class FeedbackWorkflow(Workflow):
         completion_token: str,
         uq: Any = None,
         on_step: StepHook | None = None,
+        completion_requires: str | None = None,
     ) -> None:
         super().__init__(agents, uq, on_step)
         self.solver, self.critic = agents
         self.max_rounds, self.completion_token = max_rounds, completion_token
+        self.completion_requires = re.compile(completion_requires) if completion_requires else None
         graph = StateGraph(RunState)
         graph.add_node(self.solver.id, self._solver_node)
         graph.add_node(f"uq_{self.solver.id}", self._measure(None))
@@ -71,14 +75,24 @@ class FeedbackWorkflow(Workflow):
 
     def _critic_node(self, state: RunState) -> dict[str, Any]:
         update = self._speak(self.critic, state, state["round"])
-        done = self.completion_token in update["generation_metadata"][0].text
-        return update | {"completed": done, "termination_reason": "task_done" if done else None}
+        text = update["generation_metadata"][0].text
+        done = self.completion_token in text and (
+            self.completion_requires is None or self.completion_requires.search(text)
+        )
+        return update | {"completed": bool(done), "termination_reason": "task_done" if done else None}
 
     def _route(self, state: RunState) -> str:
         return END if state["completed"] or state["round"] >= self.max_rounds else self.solver.id
 
     def termination_reason(self, state: RunState) -> str:
         return "task_done" if state["completed"] else "max_rounds"
+
+    def metadata(self, state: RunState) -> dict[str, Any]:
+        if self.completion_requires is None:
+            return {}
+        critic = [m["content"] for m in state["messages"] if m["agent_id"] == self.critic.id]
+        ignored = sum(self.completion_token in c for c in critic) - int(state["completed"])
+        return {"ignored_completion_token": ignored}
 
     def final_answer(self, traces: list[AgentTrace]) -> str:
         return traces[0].final_content

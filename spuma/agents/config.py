@@ -61,12 +61,16 @@ class AgentsConfig:
     workflow: str = "sequential"
     max_rounds: int = 10
     completion_token: str = "TASK_DONE"
+    # feedback: the critic completes only if its response also matches this regex (e.g. a CORRECT verdict)
+    completion_requires: str | None = None
 
     def __post_init__(self) -> None:
         check_choice("agents.workflow", self.workflow, ("sequential", "feedback", "star"))
         check_range("agents.max_rounds", self.max_rounds, gt=0)
         if not self.completion_token.strip():
             raise ValueError("agents.completion_token must not be empty")
+        if self.completion_requires is not None:
+            re.compile(self.completion_requires)
         if self.workflow == "feedback" and len(self.enabled) != 2:
             raise ValueError(f"agents.workflow feedback needs exactly 2 enabled agents, got {len(self.enabled)}")
         if self.workflow == "sequential" and len(self.enabled) != 3:

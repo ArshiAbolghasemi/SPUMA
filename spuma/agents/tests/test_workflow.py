@@ -191,3 +191,32 @@ def test_sequential_without_completion_token_still_ends_after_the_finalizer(monk
     traj = build_workflow(lambda _id: backend).run("p1", "q")
     assert len(backend.calls) == 3 and traj.termination_reason == "no_completion_token"
     assert traj.metadata["early_completion_token"] == ["analyst"]
+
+
+def _qa_feedback_settings(monkeypatch):
+    from spuma.config import PROJECT_ROOT, SETTINGS_FILE_ENV, get_settings  # noqa: PLC0415
+
+    path = PROJECT_ROOT / "config" / "feedbackloop" / "mmlu_ma_qwen2_5_7b_feedbackloop.yaml"
+    monkeypatch.setenv(SETTINGS_FILE_ENV, str(path))
+    get_settings.cache_clear()
+
+
+def test_reviewer_cannot_end_the_loop_while_reporting_an_error(monkeypatch, scripted_backend_cls):
+    _qa_feedback_settings(monkeypatch)
+    wrong = "VERDICT: INCORRECT\nFEEDBACK: B contradicts the premise.\nSUGGESTED_ANSWER: C\nTASK_DONE"
+    right = "VERDICT: CORRECT\nFEEDBACK: Justified.\nSUGGESTED_ANSWER: C\nTASK_DONE"
+    backend = scripted_backend_cls(["ANSWER: B", wrong, "ANSWER: C", right])
+    traj = build_workflow(lambda _id: backend).run("p1", "Question:\nq?\n\nChoices:\nA. a\nB. b\nC. c\nD. d")
+    assert traj.rounds == 2 and traj.termination_reason == "task_done" and traj.final_answer_text == "ANSWER: C"
+    assert traj.metadata == {"ignored_completion_token": 1}
+    revised = traj.agents[0].steps[1].input_messages
+    assert revised[-1] == {"role": "user", "content": wrong}  # the solver sees the critique before revising
+
+
+def test_qa_reviewer_prompt_reviews_rather_than_answers(monkeypatch):
+    _qa_feedback_settings(monkeypatch)
+    from spuma.config import get_settings  # noqa: PLC0415
+
+    solver, reviewer = get_settings().agents.enabled
+    assert "FINAL ANSWER FORMAT" in solver.system_prompt and "FINAL ANSWER FORMAT" not in reviewer.system_prompt
+    assert "only\ntogether with VERDICT: CORRECT" in reviewer.system_prompt

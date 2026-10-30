@@ -53,6 +53,7 @@ agents:
   workflow: feedback
   max_rounds: 10
   completion_token: TASK_DONE
+  completion_requires: 'VERDICT:\W*CORRECT\b'  # a reviewer that finds an error cannot end the loop
   items:
     - id: solver
       role: solver
@@ -60,8 +61,8 @@ agents:
       user_template: "{problem}"
     - id: reviewer
       role: reviewer
-      prompt: [roles/general, datasets/mmlu, roles/feedback_reviewer, verification/mmlu, schemas/mmlu]
-      user_template: "{problem}\n\nLatest response from the Solver:\n{previous}\n\nReview the response and give your feedback. If the answer is adequately justified, end with TASK_DONE."
+      prompt: [roles/general, datasets/mmlu, roles/feedback_reviewer, verification/mmlu]
+      user_template: "{problem}\n\nLatest response from the Solver:\n{previous}\n\nReview the response and give your feedback. End with TASK_DONE if and only if your verdict is CORRECT."
 
 dataset:
   name: mmlu

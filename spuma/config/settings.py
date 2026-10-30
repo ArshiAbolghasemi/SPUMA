@@ -109,6 +109,8 @@ class Settings:
         data = {k: v for k, v in self.to_dict().items() if k in ("project", "agents", "uncertainty")}
         # agents without `templates` / `prompt` hash as before those fields existed (existing artifact directories
         # stay valid); a composed prompt is hashed through its text, in system_prompt
+        if data["agents"].get("completion_requires") is None:
+            data["agents"].pop("completion_requires", None)
         data["agents"]["items"] = [
             {k: v for k, v in a.items() if k not in ("templates", "prompt") or v} for a in data["agents"]["items"]
         ]

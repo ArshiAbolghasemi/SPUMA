@@ -34,7 +34,9 @@ def build_workflow(
     config = get_settings().agents
     agents = build_agents(backend_for)
     if config.workflow == "feedback":
-        return FeedbackWorkflow(agents, config.max_rounds, config.completion_token, uq, on_step)
+        return FeedbackWorkflow(
+            agents, config.max_rounds, config.completion_token, uq, on_step, config.completion_requires
+        )
     if config.workflow == "star":
         return StarWorkflow(agents, config.completion_token, uq, on_step)
     return MultiAgentWorkflow(agents, uq, on_step, config.completion_token)

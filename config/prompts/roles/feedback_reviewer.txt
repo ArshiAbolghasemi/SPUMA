@@ -20,4 +20,7 @@ FEEDBACK: <specific feedback>
 SUGGESTED_ANSWER: <dataset-specific answer>
 
 Append TASK_DONE only when the established Feedback Loop
-completion criterion is satisfied.
+completion criterion is satisfied: write TASK_DONE only
+together with VERDICT: CORRECT, never with INCORRECT or
+UNCERTAIN. When you find an error, end without TASK_DONE so
+that the Solver can revise its answer.

@@ -42,7 +42,9 @@ def test_settings_compose_dataset_and_role_prompts(monkeypatch, dataset, archite
     dataset_text, schema = compose_prompt([f"datasets/{dataset}"]), compose_prompt([f"schemas/{dataset}"])
     for agent in settings.agents.enabled:
         prompt = agent.system_prompt
-        assert prompt.startswith("GENERAL RULES") and dataset_text in prompt and prompt.endswith(schema)
+        assert prompt.startswith("GENERAL RULES") and dataset_text in prompt
+        # a feedback reviewer critiques; it does not give the final answer, so it has no answer format
+        assert prompt.endswith(schema) == (agent.id != "reviewer"), agent.id
         appends = "TASK_DONE" in prompt.replace("Do not output TASK_DONE", "")
         assert appends == (agent.id in COMPLETERS[architecture]), agent.id
     assert settings.chmm.frozen_from == [f"math_ma_qwen2_5_7b_{architecture}"]
