@@ -1,6 +1,51 @@
 # SPUMA
 Probabilistic Uncertainty Estimation in Multi-Agent LLM Systems via Sum-Product Networks
 
+## Documentation
+
+### Datasets
+
+| Dataset | Task | Agents see | Answer format |
+|---|---|---|---|
+| [MATH](docs/datasets/math.md) | competition mathematics | the problem | `\boxed{...}` |
+| [MMLU](docs/datasets/mmlu.md) | four-choice academic and professional questions | the question and choices A–D | `ANSWER: <A/B/C/D>` |
+| [MuSiQue](docs/datasets/musique.md) | evidence-grounded multi-hop questions | the question and 20 numbered paragraphs | `EVIDENCE:` and `ANSWER:` |
+| [MoreHopQA](docs/datasets/morehopqa.md) | closed-book multi-hop questions with a final reasoning step | the question | `ANSWER: <short value>` |
+
+How every dataset is split and graded: [splits and grading](docs/datasets/splits-and-grading.md).
+
+### Architectures
+
+| Architecture | Agents | LLM calls per problem | Graded response |
+|---|---|---|---|
+| [Feedback loop](docs/architectures/feedbackloop.md) | solver ⇄ reviewer | 2 per round, up to 10 rounds | the solver's last response |
+| [Star](docs/architectures/star.md) | Star coordinator → analyst → Star → verifier → Star | exactly 5 | the Star final synthesis |
+| [Sequential](docs/architectures/sequential.md) | solver → verifier → finalizer | exactly 3 | the finalizer's response |
+
+Model, sampling, seeds, per-response measurement and prompt composition: [shared mechanics](docs/architectures/common.md).
+
+### Uncertainty quantification
+
+```mermaid
+flowchart TD
+    G["generate<br/>each agent response + 10 Monte Carlo samples"] --> M["per-response metrics<br/>SE · MCSP · NLL · length"]
+    M --> SA["standalone scores<br/>RMS / last-step SE and MCSP"]
+    M --> F["SPN features<br/>per agent (feedback loop) or per response (star, sequential)"]
+    F --> W["feedback loop only:<br/>RMS or CHMM-weighted aggregation"]
+    W --> SPN["joint SPN<br/>P(wrong | features) and its posterior entropy"]
+    F --> SPN
+    SA --> E["evaluate on the test split<br/>AUROC · AUPRC · AUARC · AURC · Brier · ECE<br/>paired problem bootstrap"]
+    SPN --> E
+```
+
+| Page | Content |
+|---|---|
+| [Per-response metrics](docs/uncertainty/metrics.md) | semantic entropy, Monte Carlo sequence probability, negative log-likelihood, token length |
+| [Scores per architecture](docs/uncertainty/methods.md) | every evaluated score and exactly which features it uses |
+| [Sum-product network](docs/uncertainty/spn.md) | the joint SPN: P(wrong \| features), posterior entropy, structure learning, leaves, settings |
+| [CHMM weighting](docs/uncertainty/chmm.md) | question drift, interaction gap, hidden states, weights (feedback loop) |
+| [Training and evaluation](docs/uncertainty/evaluation.md) | SPN training, calibration, metrics, bootstrap, dataset-specific and frozen protocols |
+
 ## Setup
 
 Requirements: [uv](https://docs.astral.sh/uv/), Python 3.12 (uv installs it), and for real runs an NVIDIA
