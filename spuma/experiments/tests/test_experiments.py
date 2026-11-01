@@ -81,3 +81,19 @@ def test_a_failing_experiment_does_not_stop_the_others(experiments, monkeypatch)
 def test_missing_settings_file_is_reported(tmp_path):
     with pytest.raises(FileNotFoundError, match="not found"):
         Experiment(name="x", config_file=tmp_path / "missing.yaml").activate()
+
+
+def test_selectors_take_comma_separated_values(experiments, monkeypatch):
+    made, log, _ = experiments
+    for name, (arch, dataset) in {"a": ("star", "mmlu"), "b": ("sequential", "musique")}.items():
+        made[name] = dataclasses.replace(made[name], architecture=arch, dataset=dataset)
+    monkeypatch.setattr(cli, "EXPERIMENTS", made)
+    assert cli.main(["--experiment", "a,b", "--phase", "train,evaluate"]) == 0
+    assert log == [("exp_a", ["train", "evaluate"], None), ("exp_b", ["train", "evaluate"], None)]
+    log.clear()
+    assert cli.main(["--architecture", "star,sequential", "--architecture", "feedbackloop"]) == 0
+    assert [n for n, _, _ in log] == ["exp_a", "exp_b"]
+    log.clear()
+    assert cli.main(["--dataset", "musique"]) == 0 and [n for n, _, _ in log] == ["exp_b"]
+    with pytest.raises(SystemExit):
+        cli.main(["--architecture", "star,ring"])

@@ -4,9 +4,11 @@
     uv run python -m spuma.experiments --experiment math_ma_qwen2_5_7b_feedbackloop  # one experiment, by name
     uv run python -m spuma.experiments --phase train --phase evaluate        # from saved artifacts
     uv run python -m spuma.experiments --experiment math_ma_qwen2_5_7b_feedbackloop --limit 5  # smoke run: 5 per split
-    uv run python -m spuma.experiments --architecture sequential --dataset musique  # by architecture and/or dataset
+    uv run python -m spuma.experiments --architecture star,sequential --dataset musique  # by architecture / dataset
+    uv run python -m spuma.experiments --dataset mmlu,musique --phase train,evaluate  # several datasets and phases
     uv run python -m spuma.experiments --list                                # registered experiments
 
+--experiment, --architecture, --dataset and --phase take comma-separated values and can be repeated.
 Each experiment runs with its own settings file (SPUMA_* environment overrides apply to every experiment).
 (`scripts/run-experiments.sh` wraps this and forwards the same flags.)
 """
@@ -15,6 +17,7 @@ import argparse
 import json
 import logging
 import sys
+from collections.abc import Callable
 
 from spuma.chmm.experiment import METRIC_NAMES, consolidate
 from spuma.config import PROJECT_ROOT
@@ -24,23 +27,37 @@ from spuma.experiments.runner import PHASES
 logger = logging.getLogger("spuma.experiments")
 
 
+def comma_separated(allowed: list[str]) -> Callable[[str], list[str]]:
+    """argparse type: "a,b" -> ["a", "b"], each checked against `allowed`."""
+
+    def parse(value: str) -> list[str]:
+        items = [v.strip() for v in value.split(",") if v.strip()]
+        invalid = [v for v in items if v not in allowed] or ([] if items else [value])
+        if invalid:
+            raise argparse.ArgumentTypeError(f"invalid choice {invalid} (choose from {', '.join(allowed)})")
+        return items
+
+    return parse
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="run-experiments", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument(
-        "--experiment", action="append", choices=sorted(EXPERIMENTS), help="run only this experiment (repeatable)"
-    )
-    parser.add_argument(
-        "--architecture", action="append", choices=ARCHITECTURES, help="only experiments of this architecture"
-    )
-    parser.add_argument(
-        "--dataset",
-        action="append",
-        choices=sorted({e.dataset for e in EXPERIMENTS.values()}),
-        help="only experiments on this dataset (repeatable)",
-    )
-    parser.add_argument("--phase", action="append", choices=PHASES, help="run only this phase (repeatable)")
+    selectors = {
+        "--experiment": (sorted(EXPERIMENTS), "run only these experiments"),
+        "--architecture": (list(ARCHITECTURES), "only experiments of these architectures"),
+        "--dataset": (sorted({e.dataset for e in EXPERIMENTS.values()}), "only experiments on these datasets"),
+        "--phase": (list(PHASES), "run only these phases"),
+    }
+    for flag, (allowed, help_text) in selectors.items():
+        parser.add_argument(
+            flag,
+            action="extend",
+            type=comma_separated(allowed),
+            metavar="X[,X...]",
+            help=f"{help_text}, comma-separated, repeatable; from: {', '.join(allowed)}",
+        )
     parser.add_argument("--limit", type=int, help="use only the first N problems of each split")
     parser.add_argument("--list", action="store_true", help="list the registered experiments and exit")
     parser.add_argument(
@@ -56,7 +73,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     names = [
         name
-        for name in args.experiment or list(EXPERIMENTS)
+        for name in dict.fromkeys(args.experiment or EXPERIMENTS)
         if (not args.architecture or EXPERIMENTS[name].architecture in args.architecture)
         and (not args.dataset or EXPERIMENTS[name].dataset in args.dataset)
     ]

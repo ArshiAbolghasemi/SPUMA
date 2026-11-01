@@ -4,6 +4,7 @@
 #   scripts/run-experiments.sh --experiment math_ma_qwen2_5_7b_feedbackloop  # one experiment by name (repeatable)
 #   scripts/run-experiments.sh --experiment math_ma_qwen2_5_7b_feedbackloop --phase score --phase train --phase evaluate
 #   scripts/run-experiments.sh --experiment math_ma_qwen2_5_7b_feedbackloop --limit 5  # smoke run: 5 problems per split
+#   scripts/run-experiments.sh --architecture star,sequential --dataset musique   # comma-separated, repeatable
 #   scripts/run-experiments.sh --list                                   # registered experiments
 set -euo pipefail
 cd "$(dirname "$0")/.."
