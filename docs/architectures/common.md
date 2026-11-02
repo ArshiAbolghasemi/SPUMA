@@ -44,7 +44,7 @@ flowchart LR
 
 | Fragment | Content |
 |---|---|
-| `roles/general.txt` | act only in your own role, use only the given context, never access reference answers, follow the output format |
+| `roles/general.txt` | act only in your own role, base the answer on the question, any given context and well-established knowledge without inventing facts, never access reference answers, follow the output format |
 | `datasets/<dataset>.txt` | what the task is and how to reason about it |
 | `roles/<architecture>_<role>.txt` | the agent's responsibilities and output structure (e.g. `VERDICT:` / `VERIFIED_ANSWER:` for verifiers) |
 | `verification/<dataset>.txt` | dataset-specific checking and finalization rules |

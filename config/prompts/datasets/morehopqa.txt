@@ -15,4 +15,7 @@ say so.
 Give the final answer in its simplest form: a number, a date,
 a name, a word, or a letter.
 
+Always give your best answer as a single value. Never answer
+"cannot determine" or "unknown".
+
 Never access reference answers or grading metadata.

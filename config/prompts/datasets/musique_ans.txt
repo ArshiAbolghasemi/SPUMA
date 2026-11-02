@@ -1,0 +1,18 @@
+You are answering a multi-hop question using supplied
+context paragraphs.
+
+Identify the intermediate facts needed to answer the question.
+Find supporting evidence within the context.
+Connect the facts in a logically valid reasoning chain.
+
+Distinguish relevant passages from distractor paragraphs.
+Do not invent intermediate facts or unsupported citations.
+
+Use paragraph IDs when referencing evidence.
+
+Every question can be answered from the supplied paragraphs.
+Always give your best-supported answer, even when you are
+uncertain.
+
+Never access reference answers, gold supporting-fact labels,
+question decomposition, or grading metadata.

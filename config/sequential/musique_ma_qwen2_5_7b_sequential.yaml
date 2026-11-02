@@ -55,20 +55,21 @@ agents:
   items:
     - id: solver
       role: solver
-      prompt: [roles/general, datasets/musique, roles/sequential_solver, schemas/musique]
+      prompt: [roles/general, datasets/musique_ans, roles/sequential_solver, schemas/musique_ans]
       user_template: "{problem}"
     - id: verifier
       role: verifier
-      prompt: [roles/general, datasets/musique, roles/sequential_verifier, verification/musique, schemas/musique]
+      prompt: [roles/general, datasets/musique_ans, roles/sequential_verifier, verification/musique_ans, schemas/musique_ans]
       user_template: "{problem}\n\nSolver's response:\n{solver}"
     - id: finalizer
       role: finalizer
-      prompt: [roles/general, datasets/musique, roles/sequential_finalizer, verification/musique, schemas/musique]
+      prompt: [roles/general, datasets/musique_ans, roles/sequential_finalizer, verification/musique_ans, schemas/musique_ans]
       user_template: "{problem}\n\nSolver's response:\n{solver}\n\nVerifier's assessment:\n{verifier}\n\nGive the final answer."
 
 dataset:
   name: musique
-  variant: ans               # MuSiQue-Full: variant: full, source: local, and data_files with the official
+  variant: ans               # (prompts: the *_ans fragments, no abstain option) MuSiQue-Full: variant: full,
+                             # the musique fragments (with INSUFFICIENT_INFORMATION), source: local, and data_files with the official
                              # musique_full_v1.0_{train,dev}.jsonl from github.com/StonyBrookNLP/musique
   source: huggingface
   hf_path: dgslibisey/MuSiQue  # verified mirror of the official v1.0 files (19,938 train / 2,417 dev)

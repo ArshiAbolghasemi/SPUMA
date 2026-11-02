@@ -55,23 +55,24 @@ agents:
   items:
     - id: star
       role: star_coordinator
-      prompt: [roles/general, datasets/musique, roles/star_coordinator, schemas/musique]
+      prompt: [roles/general, datasets/musique_ans, roles/star_coordinator, schemas/musique_ans]
       templates:
         delegation: "PHASE 1 — DELEGATION\n\n{problem}\n\nWrite your delegation to the Analyst."
         verification_request: "PHASE 2 — VERIFICATION REQUEST\n\nAnalyst's solution:\n{solution}\n\nWrite your verification request to the Verifier."
         final_synthesis: "PHASE 3 — FINAL SYNTHESIS\n\nVerifier's assessment:\n{assessment}\n\nSynthesize the final answer in the required format and append TASK_DONE."
     - id: analyst
       role: analyst
-      prompt: [roles/general, datasets/musique, roles/star_analyst, schemas/musique]
+      prompt: [roles/general, datasets/musique_ans, roles/star_analyst, schemas/musique_ans]
       user_template: "{problem}\n\nRequest from Star (the coordinator):\n{request}"
     - id: verifier
       role: verifier
-      prompt: [roles/general, datasets/musique, roles/star_verifier, verification/musique, schemas/musique]
+      prompt: [roles/general, datasets/musique_ans, roles/star_verifier, verification/musique_ans, schemas/musique_ans]
       user_template: "{problem}\n\nAnalyst's solution:\n{solution}\n\nVerification request from Star (the coordinator):\n{request}"
 
 dataset:
   name: musique
-  variant: ans               # MuSiQue-Full: variant: full, source: local, and data_files with the official
+  variant: ans               # (prompts: the *_ans fragments, no abstain option) MuSiQue-Full: variant: full,
+                             # the musique fragments (with INSUFFICIENT_INFORMATION), source: local, and data_files with the official
                              # musique_full_v1.0_{train,dev}.jsonl from github.com/StonyBrookNLP/musique
   source: huggingface
   hf_path: dgslibisey/MuSiQue  # verified mirror of the official v1.0 files (19,938 train / 2,417 dev)

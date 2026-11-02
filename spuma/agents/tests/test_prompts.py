@@ -15,6 +15,8 @@ ARCHITECTURES = ("feedbackloop", "star", "sequential")
 DATASETS = ("mmlu", "musique", "morehopqa")
 # the agents whose role prompt asks them to append TASK_DONE (everyone else is told not to)
 COMPLETERS = {"feedbackloop": {"reviewer"}, "star": {"star"}, "sequential": {"finalizer"}}
+# fragment name per dataset (MuSiQue-Ans has its own, without the INSUFFICIENT_INFORMATION option)
+FRAGMENT = {"mmlu": "mmlu", "musique": "musique_ans", "morehopqa": "morehopqa"}
 
 
 def _activate(monkeypatch, dataset, architecture):
@@ -39,7 +41,8 @@ def test_fragments_are_joined_in_order_and_checked():
 @pytest.mark.parametrize("dataset", DATASETS)
 def test_settings_compose_dataset_and_role_prompts(monkeypatch, dataset, architecture):
     settings = _activate(monkeypatch, dataset, architecture)
-    dataset_text, schema = compose_prompt([f"datasets/{dataset}"]), compose_prompt([f"schemas/{dataset}"])
+    fragment = FRAGMENT[dataset]
+    dataset_text, schema = compose_prompt([f"datasets/{fragment}"]), compose_prompt([f"schemas/{fragment}"])
     for agent in settings.agents.enabled:
         prompt = agent.system_prompt
         assert prompt.startswith("GENERAL RULES") and dataset_text in prompt
@@ -48,6 +51,12 @@ def test_settings_compose_dataset_and_role_prompts(monkeypatch, dataset, archite
         appends = "TASK_DONE" in prompt.replace("Do not output TASK_DONE", "")
         assert appends == (agent.id in COMPLETERS[architecture]), agent.id
     assert settings.chmm.frozen_from == [f"math_ma_qwen2_5_7b_{architecture}"]
+    for agent in settings.agents.enabled:
+        assert "Use only the question and the context" not in agent.system_prompt  # closed-book tasks may answer
+        if dataset == "musique":  # MuSiQue-Ans: every question is answerable, so no abstain option
+            assert "INSUFFICIENT_INFORMATION" not in agent.system_prompt
+        if dataset == "morehopqa":
+            assert 'Never answer\n"cannot determine"' in agent.system_prompt
     assert settings.experiment.name == f"ma_qwen_{dataset}_{architecture}"
 
 

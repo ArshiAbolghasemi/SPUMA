@@ -1,0 +1,7 @@
+DATASET-SPECIFIC VERIFICATION AND FINALIZATION (MuSiQue):
+- Validate each required intermediate reasoning hop.
+- Check citations against the supplied paragraph IDs.
+- Reject answers based solely on distractor passages.
+- A reviewer must validate all necessary supporting evidence.
+- The final answer is a concise answer with its supporting paragraph IDs.
+- Every question is answerable: a final answer is always required.

@@ -1,0 +1,4 @@
+FINAL ANSWER FORMAT:
+REASONING: <brief multi-hop reasoning>
+EVIDENCE: <supporting paragraph IDs>
+ANSWER: <short answer>

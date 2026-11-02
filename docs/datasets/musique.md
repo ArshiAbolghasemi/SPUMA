@@ -80,9 +80,13 @@ wrong. For MuSiQue-Full's unanswerable questions, only `INSUFFICIENT_INFORMATION
 ## Prompts
 
 Composed from [`config/prompts/`](../../config/prompts) fragments:
-- **`datasets/musique.txt`:** use the paragraphs, cite paragraph ids, ignore distractors, and report
-  `INSUFFICIENT_INFORMATION` when the context does not support an answer.
-- **`verification/musique.txt`:** validate each hop and each citation.
-- **`schemas/musique.txt`:** the `REASONING:` / `EVIDENCE:` / `ANSWER:` format.
+- **`datasets/musique_ans.txt`:** use the paragraphs, cite paragraph ids and ignore distractors. Every question
+  is answerable, so the agents always give their best-supported answer.
+- **`verification/musique_ans.txt`:** validate each hop and each citation; a final answer is always required.
+- **`schemas/musique_ans.txt`:** the `REASONING:` / `EVIDENCE:` / `ANSWER:` format.
+
+MuSiQue-Ans has no abstain option, because all its questions are answerable. For MuSiQue-Full, which contains
+unanswerable questions, use the `datasets/`, `verification/` and `schemas/musique.txt` fragments instead. They let
+agents answer `INSUFFICIENT_INFORMATION` when the paragraphs do not support an answer.
 
 The question plus 20 paragraphs can reach about 5k tokens, which is why the engine's context length is 32,768.

@@ -61,7 +61,8 @@ quotes are removed, then it's compared by answer type:
 ## Prompts
 
 Composed from [`config/prompts/`](../../config/prompts) fragments:
-- **`datasets/morehopqa.txt`:** identify the intermediate facts, then apply the final operation step by step.
+- **`datasets/morehopqa.txt`:** identify the intermediate facts from well-established knowledge, then apply the
+  final operation step by step. Always give a best answer: never "cannot determine" or "unknown".
 - **`verification/morehopqa.txt`:** check the facts and recompute the operation.
 - **`schemas/morehopqa.txt`:** `REASONING:` / `ANSWER:` with a single short value.
 
