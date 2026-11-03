@@ -228,33 +228,31 @@ features:
     - finalizer_nll
     - finalizer_length
 
+# Lists are a grid, for the joint and the class-conditional SPN alike: one candidate per leaf x rdc_threshold x
+# min_instances_slice x that leaf's regularizer (variance_floor: normal, histogram.smoothing: histogram), each fitted
+# on the training split; the lowest validation Brier is kept. A single value means no tuning.
 spn:
   backend: spflow
   target: incorrect
   seed: 42
-  leaf: histogram
+  leaf: [normal, histogram]
   histogram:
     bins: 10
     strategy: uniform
-    smoothing: 1.0
-  min_instances_slice: 50
+    smoothing: [1.0, 5.0]           # Laplace pseudo-count per cell
+  min_instances_slice: [25, 50, 100]
   min_features_slice: 2
   n_clusters: 2
-  rdc_threshold: 0.3
+  rdc_threshold: [0.1, 0.2, 0.3, 0.4]
+  variance_floor: [0.01, 0.1]       # normal leaves: sigma^2 >= floor (standardized features)
   keep_label_dependence: true
   standardize: true
   prior_smoothing: 1.0
 
-# Class-conditional SPN next to the joint SPN: P(Z | Y=c) learned per class (LearnSPN, the `spn:` settings and
-# preprocessing), P(Y=1 | Z) by Bayes' rule with the training prior. Each list is a grid; every candidate is fitted
-# on the training split and the lowest validation Brier is kept. Methods `<spn method>_cc` in the chmm evaluation.
+# Class-conditional SPN next to the joint SPN: P(Z | Y=c) learned per class with the `spn:` settings, grid and
+# preprocessing; P(Y=1 | Z) by Bayes' rule with the training prior. Methods `<spn method>_cc` in the chmm evaluation.
 class_conditional_spn:
   enabled: true
-  leaves: [normal, histogram]
-  rdc_threshold: [0.1, 0.2, 0.3, 0.4]
-  min_instances_slice: [25, 50, 100]
-  variance_floor: [0.01, 0.1]       # normal leaves: sigma^2 >= floor (standardized features)
-  histogram_smoothing: [1.0, 5.0]   # histogram leaves: Laplace pseudo-count per cell
 
 evaluation:
   metrics:

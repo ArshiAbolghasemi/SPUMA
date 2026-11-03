@@ -1,4 +1,5 @@
-"""Custom SPFlow leaves for SPUMA's joint SPN: a binary indicator leaf for Y and a smoothed histogram leaf.
+"""Custom SPFlow leaves for SPUMA's SPNs: a binary indicator leaf for Y, a smoothed histogram leaf and a
+Gaussian leaf with a variance floor.
 
 LearnSPN creates leaves as `LeafClass(scope=..., out_channels=...)` and fits them by maximum likelihood,
 so per-fit settings the constructor cannot receive (bin edges, smoothing) come from `leaf_settings`,
@@ -26,6 +27,7 @@ class LeafSettings:
     label_smoothing: float
     bin_smoothing: float
     edges: dict[int, Tensor]
+    variance_floor: float = 0.0
 
 
 _SETTINGS: ContextVar[LeafSettings | None] = ContextVar("spuma_spn_leaf_settings", default=None)
@@ -254,26 +256,14 @@ class HistogramLeaf(LeafModule):
         )
 
 
-_VARIANCE_FLOOR: ContextVar[float] = ContextVar("spuma_spn_variance_floor", default=0.0)
-
-
-@contextmanager
-def variance_floor(floor: float) -> Iterator[None]:
-    """`FlooredNormal` leaves created inside this block keep sigma^2 >= `floor`."""
-    token = _VARIANCE_FLOOR.set(float(floor))
-    try:
-        yield
-    finally:
-        _VARIANCE_FLOOR.reset(token)
-
-
 class FlooredNormal(Normal):
     """Gaussian leaf whose MLE variance is floored: sigma^2 = max(sigma_MLE^2, floor). A slice where a feature is
     (nearly) constant would otherwise get a spike density that dominates the likelihood ratio of a class."""
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.variance_floor = _VARIANCE_FLOOR.get()
+        settings = _SETTINGS.get()  # created by LearnSPN inside `leaf_settings`; elsewhere: no floor
+        self.variance_floor = 0.0 if settings is None else settings.variance_floor
 
     def _compute_parameter_estimates(self, data: Tensor, weights: Tensor, bias_correction: bool) -> dict[str, Tensor]:
         params = super()._compute_parameter_estimates(data, weights, bias_correction)
@@ -281,4 +271,8 @@ class FlooredNormal(Normal):
         return params
 
 
-CONTINUOUS_LEAVES: dict[str, type[LeafModule]] = {"normal": Normal, "laplace": Laplace, "histogram": HistogramLeaf}
+CONTINUOUS_LEAVES: dict[str, type[LeafModule]] = {
+    "normal": FlooredNormal,
+    "laplace": Laplace,
+    "histogram": HistogramLeaf,
+}

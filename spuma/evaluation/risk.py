@@ -1,7 +1,7 @@
 """Error-risk models: anything that learns P(Y=1 | Z) from the feature matrix plugs in here.
 
 `evaluation.risk_models` in the config lists which registered models are trained and evaluated. Registered: the
-joint SPN (`spn`) and the class-conditional SPN (`spn_class_conditional`, tuned on the validation split);
+joint SPN (`spn`) and the class-conditional SPN (`spn_class_conditional`), both grid-tuned on validation;
 a new model needs a class implementing `RiskModel` and one `RISK_MODELS` entry
 (plus its name in `EvaluationConfig.risk_models`' allowed values).
 """
@@ -17,7 +17,9 @@ from spuma.spn.model import ClassConditionalSPN, JointSPN
 
 
 class RiskModel(Protocol):
-    def fit(self, Z: np.ndarray, y: np.ndarray) -> Self: ...
+    def fit(self, Z: np.ndarray, y: np.ndarray, Z_val: np.ndarray, y_val: np.ndarray) -> Self:
+        """Fit on the training rows; the validation rows may only select hyper-parameters."""
+        ...
 
     def predict_error_proba(self, Z: np.ndarray) -> np.ndarray:
         """P(Y=1 | Z) for each row (Y=1: the final answer is wrong)."""
@@ -35,15 +37,11 @@ class RiskModelSpec:
     build: Callable[[], RiskModel]
     load: Callable[[Path], RiskModel]
     suffix: str = ".pt"
-    # fit(Z, y, Z_val, y_val): hyper-parameters are selected on the validation split
-    tuned_on_validation: bool = False
 
 
 RISK_MODELS: dict[str, RiskModelSpec] = {
     "spn": RiskModelSpec(build=JointSPN, load=JointSPN.load),
-    "spn_class_conditional": RiskModelSpec(
-        build=ClassConditionalSPN, load=ClassConditionalSPN.load, tuned_on_validation=True
-    ),
+    "spn_class_conditional": RiskModelSpec(build=ClassConditionalSPN, load=ClassConditionalSPN.load),
 }
 
 

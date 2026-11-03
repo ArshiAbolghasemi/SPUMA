@@ -11,10 +11,12 @@ from spuma.chmm.config import CHMMConfig, DistanceConfig, HMMConfig
 from spuma.chmm.distances import LexicalDistance, preceding, situational_distances, token_f1
 from spuma.chmm.experiment import STANDALONE, CHMMAggregation, chmm_method
 from spuma.chmm.hmm import SituationalHMM, state_coefficients, step_weights
+from spuma.common.config import to_plain
 from spuma.config import PROJECT_ROOT, SETTINGS_FILE_ENV, get_settings
 from spuma.dataset.base import Problem
 from spuma.experiments.runner import ExperimentRunner
 from spuma.experiments.tests.test_e2e import Engines, FakeDataset, fake_capabilities  # noqa: F401
+from spuma.spn.config import SPNConfig
 
 
 def test_alpha_zero_gives_uniform_weights_and_weights_sum_to_one():
@@ -87,11 +89,11 @@ def experiment(raw_config, tmp_path):
     return _run_experiment(raw_config, tmp_path)
 
 
-def _run_experiment(raw, tmp_path):
+def _run_experiment(raw, tmp_path, **spn):
     raw["experiment"].update({"name": "id_math", "output_dir": str(tmp_path), "concurrent_problems": 1})
     raw["agents"]["max_rounds"] = 3
     raw["evaluation"]["bootstrap"]["iterations"] = 20
-    raw["spn"]["min_instances_slice"] = 20
+    raw["spn"] = {**to_plain(SPNConfig()), "min_instances_slice": 20, **spn}  # scalars unless given: no grid
     raw["model"]["backend"], raw["model"]["scoring_backend"] = "transformers", "same"
     path = tmp_path / "source.yaml"
     path.write_text(yaml.safe_dump(raw))
@@ -134,18 +136,13 @@ def test_chmm_runs_in_the_experiment_and_evaluates_frozen(experiment):
 
 
 def test_class_conditional_spn_is_tuned_on_validation_and_compared_with_the_joint_spn(raw_config, tmp_path):
-    raw_config["class_conditional_spn"] = {
-        "enabled": True,
-        "leaves": ["normal", "histogram"],
-        "rdc_threshold": [0.3],
-        "min_instances_slice": [20],
-        "variance_floor": [0.01, 0.1],
-        "histogram_smoothing": [1.0],
-    }
-    runner = _run_experiment(raw_config, tmp_path)
+    raw_config["class_conditional_spn"] = {"enabled": True}
+    runner = _run_experiment(raw_config, tmp_path, leaf=["normal", "histogram"], variance_floor=[0.01, 0.1])
     aggregation = CHMMAggregation(runner)
     ev = runner.store.read_json(f"{aggregation.out}/evaluation.json")
     for m in aggregation.spn_methods:
+        joint = runner.store.read_json(f"{aggregation.out}/models/{m}_status.json")
+        assert joint["model"] == "joint" and len(joint["tuning"]) == 3  # the same grid tunes both SPNs
         status = runner.store.read_json(f"{aggregation.out}/models/{m}_cc_status.json")
         assert status["model"] == "class_conditional" and len(status["tuning"]) == 3
         assert status["validation_rows"] > 0 and set(status["structure"]) == {"correct", "wrong"}

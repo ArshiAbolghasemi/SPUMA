@@ -135,10 +135,9 @@ def _config(config, tmp_path, backend="transformers", scoring="same", concurrent
     raw["agents"]["max_rounds"] = ROUNDS
     raw["evaluation"]["bootstrap"]["iterations"] = 50
     raw["evaluation"]["risk_models"] = ["spn"]  # the risk-model path (used by OOD evaluation)
-    raw["spn"]["min_instances_slice"] = 20
-    # a one-point-per-leaf grid keeps the class-conditional SPN (enabled in the experiment configs) fast
-    raw["class_conditional_spn"].update({"rdc_threshold": [0.3], "min_instances_slice": [20]})
-    raw["class_conditional_spn"].update({"variance_floor": [0.01], "histogram_smoothing": [1.0]})
+    # a two-point grid (one per leaf) keeps the SPNs of the experiment configs fast
+    raw["spn"].update({"rdc_threshold": 0.3, "min_instances_slice": 20, "variance_floor": 0.01})
+    raw["spn"]["histogram"]["smoothing"] = 1.0
     raw["model"]["backend"], raw["model"]["scoring_backend"] = backend, scoring
     return type(config).from_dict(raw)
 

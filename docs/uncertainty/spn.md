@@ -113,12 +113,14 @@ with the model and reused on the test split.
 |---|---|---|
 | `backend` | `spflow` | structure learning and inference library |
 | `target` | `incorrect` | Y = 1 means the final answer is wrong |
-| `leaf` | `histogram` | feature leaves (`histogram`, `normal`, `laplace`) |
-| `histogram.bins` / `strategy` / `smoothing` | 10 / `uniform` / 1.0 | histogram leaves |
-| `min_instances_slice` | 50 | below this many rows a slice is fully factorized |
+| `leaf` | grid: `normal`, `histogram` | feature leaves (`histogram`, `normal`, `laplace`) |
+| `histogram.bins` / `strategy` | 10 / `uniform` | histogram leaves |
+| `histogram.smoothing` | grid: 1.0, 5.0 | histogram Laplace pseudo-count per cell |
+| `min_instances_slice` | grid: 25, 50, 100 | below this many rows a slice is fully factorized |
 | `min_features_slice` | 2 | the smallest column set that is still split |
 | `n_clusters` | 2 | clusters per sum node |
-| `rdc_threshold` | 0.3 | independence threshold of the RDC test |
+| `rdc_threshold` | grid: 0.1, 0.2, 0.3, 0.4 | independence threshold of the RDC test |
+| `variance_floor` | grid: 0.01, 0.1 | normal leaves keep σ² ≥ floor (standardized units; 0 = none) |
 | `keep_label_dependence` | true | never split the varying label off on its own |
 | `standardize` | true | standardize features with training statistics |
 | `prior_smoothing` | 1.0 | Laplace pseudo-count of the label leaves |
@@ -140,24 +142,25 @@ P(wrong | Z)    = exp( log P(Z, 1) − logsumexp_c log P(Z, c) )
   training rows (so both classes share them). Every `spn:` setting not tuned below is reused.
 - **Training:** each SPN is learned on its class's training rows only (LearnSPN, RDC partitioning with constant
   columns split off; no label column).
-- **Regularization:** Gaussian leaves (`FlooredNormal`) keep σ² ≥ `variance_floor`; histogram leaves are
-  Laplace-smoothed with `histogram_smoothing` pseudo-counts per cell.
-- **Validation tuning:** every combination of `leaves` × `rdc_threshold` × `min_instances_slice` × the leaf's
-  regularizer is fitted on the training split; the candidate with the lowest **validation Brier score** is kept
-  (all trials are in `<method>_cc_status.json`). The test split is used only for evaluation.
+- **Regularization and tuning:** the same `spn:` grid as the joint SPN (variance floor for Gaussian leaves,
+  Laplace smoothing for histogram leaves), selected on validation Brier (see [validation grid](#validation-grid)).
 - **Methods:** with `enabled: true`, every SPN method `m` of the CHMM study (`spn`, `rms_spn`, `chmm_a<α>_spn`) gets
   `m_cc`, evaluated on the same test problems and bootstrap resamples; `evaluation.json` →
   `class_conditional_comparisons` and `results.md` hold the paired differences class-conditional − joint.
   The same model is also registered as risk model `spn_class_conditional` (`evaluation.risk_models`, `ood.risk_model`).
 
-| Setting | Default grid | Role |
-|---|---|---|
-| `enabled` | false (true in the experiment configs) | train and evaluate the class-conditional SPNs |
-| `leaves` | normal, histogram | feature-leaf families tried |
-| `rdc_threshold` | 0.1, 0.2, 0.3, 0.4 | RDC independence threshold |
-| `min_instances_slice` | 25, 50, 100 | below this many rows a slice is fully factorized |
-| `variance_floor` | 0.01, 0.1 | Gaussian σ² floor (standardized units) |
-| `histogram_smoothing` | 1.0, 5.0 | histogram Laplace pseudo-count |
+`class_conditional_spn: {enabled: true}` turns it on (default off; on in the experiment configs).
+
+### Validation grid
+
+`leaf`, `rdc_threshold`, `min_instances_slice`, `variance_floor` and `histogram.smoothing` take a value or a list.
+With lists, `SPNConfig.candidates()` crosses leaf × `rdc_threshold` × `min_instances_slice` with that leaf's
+regularizer (`variance_floor` for normal, `histogram.smoothing` for histogram, none for laplace): 48 candidates
+with the experiment configs. Every candidate is fitted on the training split and the one with the **lowest
+validation Brier score** is kept; the test split is used only for evaluation. The joint and the class-conditional
+SPN search the same grid the same way, and every trial is recorded in `<method>_status.json` (`tuning`). Scalars
+mean no tuning: the previous fixed settings are `leaf: histogram`, `smoothing: 1.0`, `min_instances_slice: 50`,
+`rdc_threshold: 0.3`, `variance_floor: 0`. Without labeled validation rows the first candidate is used.
 
 ## Saved models
 

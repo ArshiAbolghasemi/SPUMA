@@ -22,9 +22,9 @@ splits) and regenerates nothing.
        posterior entropy (`<method>_entropy`, a ranking score only). A group's CHMM feature is
        sum_{t in g} (T / n_g) w_t U_t with the trajectory-normalized w_t: with uniform weights the group mean (the
        weighted mean when pooled), a single response scaled by its relative weight T w_t.
-       One joint SPN per SPN method (the `spn:` section, unchanged), trained on the training split. With
-       `class_conditional_spn.enabled`, also one class-conditional SPN per SPN method (`<method>_cc`), fitted on
-       the training split with hyper-parameters selected on the validation split (Brier).
+       One joint SPN per SPN method (the `spn:` section), trained on the training split. With
+       `class_conditional_spn.enabled`, also one class-conditional SPN per SPN method (`<method>_cc`). Where `spn:`
+       lists several values, both select their grid point on the validation split (lowest Brier).
        Standalone scores are ranked as they are; their Brier/ECE are reported only after a Platt (logistic)
        calibrator fitted on the training split.
     6. evaluation on the test split: AUROC, AUPRC, AUARC, AURC, Brier, ECE (wrong = 1) with paired
@@ -210,16 +210,27 @@ class CHMMAggregation:
             logger.info("chmm fitted", extra=described)
             self._weigh(problems, hmm)
         y = np.array([p["label"] for p in problems])
-        spn = get_settings().spn
+        # validation: only to select the SPNs' grid point (`spn:` lists); weighted by the frozen training CHMM
+        val = [p for p in self._problems() if p["split"] == "validation"]
+        if self.uses_chmm and val:
+            self._weigh(val, hmm)
+        y_val = np.array([p["label"] for p in val], dtype=int)
+        kinds = [(JointSPN, "")] + ([(ClassConditionalSPN, CC)] if get_settings().class_conditional_spn.enabled else [])
         for m in self.spn_methods:
-            model = JointSPN.__new__(JointSPN)
-            model._init(spn, self.feature_names)
-            model.fit(self._aggregate(problems, m), y)
-            model.save(self.store.path(f"{self.out}/models/{m}.pt"))
-            status = {"status": "trained", "train_rows": len(y), "incorrect": int(y.sum()), **model.summary()}
-            self.store.write_json(f"{self.out}/models/{m}_status.json", status)
-        if get_settings().class_conditional_spn.enabled:
-            self._train_class_conditional(problems, y, spn)
+            Z, Z_val = self._aggregate(problems, m), self._aggregate(val, m) if val else None
+            for cls, suffix in kinds:
+                model = cls.__new__(cls)
+                model._init(get_settings().spn, self.feature_names)
+                model.fit(Z, y, Z_val, y_val)
+                model.save(self.store.path(f"{self.out}/models/{m}{suffix}.pt"))
+                status = {
+                    "status": "trained",
+                    "train_rows": len(y),
+                    "incorrect": int(y.sum()),
+                    "validation_rows": len(y_val),
+                    **model.summary(),
+                }
+                self.store.write_json(f"{self.out}/models/{m}{suffix}_status.json", status)
         calibrators = {}
         for m in STANDALONE:
             s = np.array([self._standalone(p, m) for p in problems])
@@ -227,30 +238,6 @@ class CHMMAggregation:
             calibrators[m] = [float(lr.coef_[0, 0]), float(lr.intercept_[0])]
         self.store.write_json(f"{self.out}/models/calibrators.json", calibrators)
         logger.info("chmm models trained", extra={"methods": self.spn_methods, "output": self.out})
-
-    def _train_class_conditional(self, problems: list[dict[str, Any]], y: np.ndarray, spn: Any) -> None:
-        """One class-conditional SPN per SPN method: fitted on `problems` (training split), tuned on validation."""
-        val = [p for p in self._problems() if p["split"] == "validation"]
-        if self.uses_chmm and val:
-            hmm = SituationalHMM.load(self.store.path(f"{self.out}/models/chmm.pkl"))
-            self._weigh(val, hmm)  # the frozen training CHMM, as for the test split
-        y_val = np.array([p["label"] for p in val], dtype=int)
-        if not len(val):
-            logger.warning("no labeled validation problems: class-conditional SPN uses the first grid candidate")
-        for m in self.spn_methods:
-            model = ClassConditionalSPN.__new__(ClassConditionalSPN)
-            model._init(spn, self.feature_names)
-            Z_val = self._aggregate(val, m) if val else None
-            model.fit(self._aggregate(problems, m), y, Z_val, y_val if val else None)
-            model.save(self.store.path(f"{self.out}/models/{m}{CC}.pt"))
-            status = {
-                "status": "trained",
-                "train_rows": len(y),
-                "incorrect": int(y.sum()),
-                "validation_rows": len(y_val),
-                **model.summary(),
-            }
-            self.store.write_json(f"{self.out}/models/{m}{CC}_status.json", status)
 
     def evaluate(self, frozen_from: Path | None = None) -> dict[str, Any]:
         """The nine methods on the test split, with the CHMM, SPNs and calibrators of `train` (or of

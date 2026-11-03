@@ -10,7 +10,7 @@ from spflow.modules.products import Product
 from spflow.modules.sums import Sum
 
 from spuma.evaluation.metrics import auroc, binary_entropy
-from spuma.spn.config import ClassConditionalSPNConfig, HistogramConfig
+from spuma.spn.config import HistogramConfig, SPNConfig
 from spuma.spn.leaves import (
     BinaryIndicatorLeaf,
     FlooredNormal,
@@ -18,7 +18,6 @@ from spuma.spn.leaves import (
     LeafSettings,
     histogram_edges,
     leaf_settings,
-    variance_floor,
 )
 from spuma.spn.model import ClassConditionalSPN, JointSPN, partition_keeping_label, partition_with_constants
 
@@ -37,7 +36,7 @@ def make_spn(config, set_settings):
     """A joint SPN built from the settings, with these `spn:` overrides installed."""
 
     def make(**spn):
-        set_settings(dataclasses.replace(config, spn=dataclasses.replace(config.spn, **spn)))
+        set_settings(dataclasses.replace(config, spn=dataclasses.replace(SPNConfig(), **spn)))  # scalar defaults
         return JointSPN()
 
     return make
@@ -239,41 +238,58 @@ def test_label_is_never_split_off_alone_while_it_varies():
 
 
 def test_floored_normal_keeps_variance_above_floor():
-    with variance_floor(0.25):
+    with leaf_settings(LeafSettings(label_smoothing=1.0, bin_smoothing=1.0, edges={}, variance_floor=0.25)):
         leaf = FlooredNormal(Scope([0]))
     leaf.maximum_likelihood_estimation(torch.full((10, 1), 3.0, dtype=torch.float64))
     assert leaf.scale.item() == pytest.approx(0.5)
 
 
-@pytest.fixture
-def class_conditional(config, set_settings):
-    def make(**grid):
-        cc = dataclasses.replace(ClassConditionalSPNConfig(enabled=True), **grid)
-        set_settings(dataclasses.replace(config, class_conditional_spn=cc))
+GRID = {
+    "leaf": ["normal", "histogram"],
+    "rdc_threshold": [0.2, 0.3],
+    "min_instances_slice": [50],
+    "variance_floor": [0.01, 0.1],
+}
 
-    return make
+
+def test_grid_candidates_cross_each_leaf_with_its_regularizer():
+    spn = SPNConfig(**GRID, histogram=HistogramConfig(smoothing=[1.0, 5.0]))
+    got = {(c.leaf, c.rdc_threshold, c.variance_floor, c.histogram.smoothing) for c in spn.candidates()}
+    assert len(spn.candidates()) == len(got) == 2 * 2 + 2 * 2
+    assert ("histogram", 0.2, 0.0, 5.0) in got and ("normal", 0.3, 0.1, 1.0) in got
+    assert SPNConfig().candidates() == [SPNConfig()]  # scalars: no tuning
+    with pytest.raises(ValueError):
+        SPNConfig(rdc_threshold=[0.3, 1.5])
 
 
-def test_class_conditional_spn_bayes_rule_priors_and_checkpoint(class_conditional, tmp_path):
-    class_conditional()
+@pytest.mark.parametrize("cls", [JointSPN, ClassConditionalSPN])
+def test_grid_is_tuned_on_validation_brier_and_checkpointed(cls, config, set_settings, tmp_path):
+    set_settings(dataclasses.replace(config, spn=SPNConfig(**GRID)))
     Z, y = _synthetic()
     Zv, yv = _synthetic(200, seed=1)
-    model = ClassConditionalSPN().fit(Z, y, Zv, yv)
-    # priors: the raw training class shares
-    assert np.allclose(np.exp(model.log_prior()), [(y == 0).mean(), (y == 1).mean()])
-    # Bayes' rule, in log space, from the two class densities
+    model = cls().fit(Z, y, Zv, yv)
+    assert len(model.tuning) == 6 and model.config in SPNConfig(**GRID).candidates()
+    best = min(t["validation_brier"] for t in model.tuning)
+    assert np.mean((model.predict_error_proba(Zv) - yv) ** 2) == pytest.approx(best)
+    assert auroc(yv, model.predict_error_proba(Zv)) > 0.9
+    model.save(tmp_path / "m.pt")
+    loaded = cls.load(tmp_path / "m.pt")
+    assert np.allclose(loaded.predict_error_proba(Zv), model.predict_error_proba(Zv))
+    assert loaded.hyperparameters() == model.hyperparameters() and loaded.config == model.config
+    # no validation rows: the first grid point, untuned
+    assert cls().fit(Z, y).config == SPNConfig(**GRID).candidates()[0]
+
+
+def test_class_conditional_spn_bayes_rule_and_empirical_prior(make_spn, tmp_path):
+    make_spn(leaf="normal")
+    Z, y = _synthetic()
+    Zv, _ = _synthetic(200, seed=1)
+    model = ClassConditionalSPN().fit(Z, y)
+    assert np.allclose(np.exp(model.log_prior()), [(y == 0).mean(), (y == 1).mean()])  # raw training shares
     data = model._features(Zv, None)
     ll = [model.root["spns"][c].log_likelihood(data).reshape(len(data), -1)[:, 0].detach().numpy() for c in (0, 1)]
     a, b = np.log((y == 1).mean()) + ll[1], np.log((y == 0).mean()) + ll[0]
     assert np.allclose(model.predict_error_proba(Zv), 1 / (1 + np.exp(b - a)))
-    # tuning: the kept candidate has the lowest validation Brier of the grid
-    best = min(t["validation_brier"] for t in model.tuning)
-    assert np.mean((model.predict_error_proba(Zv) - yv) ** 2) == pytest.approx(best)
-    assert len(model.tuning) == 4 * 3 * 2 * 2  # leaves x rdc x min_instances x regularizer
-    assert auroc(yv, model.predict_error_proba(Zv)) > 0.9
     model.save(tmp_path / "cc.pt")
-    loaded = ClassConditionalSPN.load(tmp_path / "cc.pt")
-    assert np.allclose(loaded.predict_error_proba(Zv), model.predict_error_proba(Zv))
-    assert loaded.hyperparameters() == model.hyperparameters()
     with pytest.raises(ValueError, match="class_conditional"):
         JointSPN.load(tmp_path / "cc.pt")

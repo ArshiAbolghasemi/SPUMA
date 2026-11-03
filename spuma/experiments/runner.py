@@ -346,8 +346,7 @@ class ExperimentRunner:
                 self.store.write_json(status_rel, {"status": "skipped", "reason": reason})
                 continue
             try:
-                spec = risk_model_spec(name)
-                model = spec.build().fit(Z, y, Z_val, y_val) if spec.tuned_on_validation else spec.build().fit(Z, y)
+                model = risk_model_spec(name).build().fit(Z, y, Z_val, y_val)
             except ValueError as e:
                 logger.error("risk model training failed", extra={"model": name, "error": str(e)})
                 self.store.write_json(status_rel, {"status": "failed", "error": str(e)})
