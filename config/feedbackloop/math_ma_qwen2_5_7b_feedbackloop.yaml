@@ -8,7 +8,7 @@ project:
   seed: 42
 
 experiment:
-  name: ma_qwen_math
+  name: ma_qwen_math_feedbackloop
   output_dir: artifacts
   resume: true
   concurrent_problems: 8
