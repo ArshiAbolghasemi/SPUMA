@@ -21,7 +21,7 @@ def test_registry_builds_trains_and_reloads_spn(config, set_settings, tmp_path):
 
 
 def test_unknown_risk_model():
-    assert list(RISK_MODELS) == ["spn"]
+    assert list(RISK_MODELS) == ["spn", "spn_class_conditional"]
     with pytest.raises(ValueError, match="registered"):
         risk_model_spec("xgboost")
 

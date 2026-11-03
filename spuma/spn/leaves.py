@@ -254,4 +254,31 @@ class HistogramLeaf(LeafModule):
         )
 
 
+_VARIANCE_FLOOR: ContextVar[float] = ContextVar("spuma_spn_variance_floor", default=0.0)
+
+
+@contextmanager
+def variance_floor(floor: float) -> Iterator[None]:
+    """`FlooredNormal` leaves created inside this block keep sigma^2 >= `floor`."""
+    token = _VARIANCE_FLOOR.set(float(floor))
+    try:
+        yield
+    finally:
+        _VARIANCE_FLOOR.reset(token)
+
+
+class FlooredNormal(Normal):
+    """Gaussian leaf whose MLE variance is floored: sigma^2 = max(sigma_MLE^2, floor). A slice where a feature is
+    (nearly) constant would otherwise get a spike density that dominates the likelihood ratio of a class."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.variance_floor = _VARIANCE_FLOOR.get()
+
+    def _compute_parameter_estimates(self, data: Tensor, weights: Tensor, bias_correction: bool) -> dict[str, Tensor]:
+        params = super()._compute_parameter_estimates(data, weights, bias_correction)
+        params["scale"] = params["scale"].clamp(min=math.sqrt(self.variance_floor))
+        return params
+
+
 CONTINUOUS_LEAVES: dict[str, type[LeafModule]] = {"normal": Normal, "laplace": Laplace, "histogram": HistogramLeaf}

@@ -9,11 +9,19 @@ the network polynomial gives every joint and marginal query exactly:
     U_SPUMA(Z)    = P(Y=1 | Z) = exp(log P(Z,1) − logsumexp_c log P(Z,c))     (predicted error risk)
     H(Y | Z)      = −p log p − (1−p) log(1−p)                                 (reported separately)
 
+`ClassConditionalSPN` (risk model `spn_class_conditional`) learns two independent networks instead, one density
+P(Z | Y=c) per class, and combines them with the empirical training prior pi_c by Bayes' rule:
+
+    log P(Z, Y=c) = log pi_c + log SPN_c(Z)
+    P(Y=1 | Z)    = exp(log P(Z,1) − logsumexp_c log P(Z,c))
+
 Leaves are continuous (`spn.leaf`) and inference is in log space; features given as NaN (or listed in
 `marginalize`) are integrated out exactly.
 """
 
+import dataclasses
 import io
+import itertools
 import logging
 from pathlib import Path
 from typing import Any, Self
@@ -29,9 +37,17 @@ from spflow.utils.rdc import rdc
 
 from spuma.common.config import build_config, to_plain
 from spuma.config import get_settings
-from spuma.evaluation.metrics import binary_entropy
-from spuma.spn.config import HistogramConfig, SPNConfig
-from spuma.spn.leaves import CONTINUOUS_LEAVES, BinaryIndicatorLeaf, LeafSettings, histogram_edges, leaf_settings
+from spuma.evaluation.metrics import binary_entropy, brier
+from spuma.spn.config import ClassConditionalSPNConfig, HistogramConfig, SPNConfig
+from spuma.spn.leaves import (
+    CONTINUOUS_LEAVES,
+    BinaryIndicatorLeaf,
+    FlooredNormal,
+    LeafSettings,
+    histogram_edges,
+    leaf_settings,
+    variance_floor,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -258,3 +274,117 @@ class JointSPN:
             "features": self.feature_names,
             **structure_stats(self.root),
         }
+
+
+def class_conditional_candidates(spn: SPNConfig, grid: ClassConditionalSPNConfig) -> list[tuple[SPNConfig, float]]:
+    """(`spn:` settings with the candidate's leaf, RDC threshold, slice size and smoothing, variance floor) per grid
+    point; the variance floor is 0 for leaves other than normal."""
+    out = []
+    for leaf, rdc_threshold, min_instances in itertools.product(
+        grid.leaves, grid.rdc_threshold, grid.min_instances_slice
+    ):
+        base = dataclasses.replace(spn, leaf=leaf, rdc_threshold=rdc_threshold, min_instances_slice=min_instances)
+        if leaf == "normal":
+            out += [(base, v) for v in grid.variance_floor]
+        elif leaf == "histogram":
+            out += [
+                (dataclasses.replace(base, histogram=dataclasses.replace(spn.histogram, smoothing=a)), 0.0)
+                for a in grid.histogram_smoothing
+            ]
+        else:
+            out.append((base, 0.0))
+    return out
+
+
+class ClassConditionalSPN(JointSPN):
+    """Two independent SPNs, SPN_0(Z) = P(Z | Y=0) and SPN_1(Z) = P(Z | Y=1), and the training prior pi_c.
+
+    Standardization, histogram edges (from all training rows, so both classes share them), leaves and LearnSPN
+    are JointSPN's; `root` holds {"spns": {0: SPN_0, 1: SPN_1}, "log_prior": log pi, "variance_floor": ...}, so
+    the checkpoint format and `load` are JointSPN's as well.
+    """
+
+    kind = "class_conditional"
+    variance_floor = 0.0
+
+    def _feature_leaf(self, n_features: int) -> Any:
+        if self.config.leaf == "normal":
+            return FlooredNormal(scope=Scope(list(range(n_features))), out_channels=1)
+        return super()._feature_leaf(n_features)
+
+    def fit(
+        self, Z: np.ndarray, y: np.ndarray, Z_val: np.ndarray | None = None, y_val: np.ndarray | None = None
+    ) -> Self:
+        """Fit on (Z, y). With a labeled validation split, every `class_conditional_spn:` candidate is fitted on
+        (Z, y) and the one with the lowest validation Brier score is kept (its trials in `self.tuning`)."""
+        if Z_val is None or y_val is None or not len(y_val):
+            return self._fit(Z, y)
+        trials, best = [], None
+        for config, floor in class_conditional_candidates(self.config, get_settings().class_conditional_spn):
+            model = ClassConditionalSPN.__new__(ClassConditionalSPN)
+            model._init(config, self.feature_names)
+            model.variance_floor = floor
+            score = brier(np.asarray(y_val), model._fit(Z, y).predict_error_proba(Z_val))
+            score = score if np.isfinite(score) else float("inf")
+            trials.append({**model.hyperparameters(), "validation_brier": score})
+            if best is None or score < best[0]:
+                best = (score, model)
+        self.__dict__.update(best[1].__dict__)
+        self.tuning = trials
+        logger.info("class-conditional SPN tuned", extra={"selected": self.hyperparameters(), "brier": best[0]})
+        return self
+
+    def _fit(self, Z: np.ndarray, y: np.ndarray) -> Self:
+        data, counts, settings = self._prepare(Z, y)
+        y = np.asarray(y, dtype=int)
+        torch.manual_seed(self.config.seed)
+        prev = torch.get_default_dtype()
+        torch.set_default_dtype(torch.float64)
+        try:
+            with leaf_settings(settings), variance_floor(self.variance_floor):
+                spns = {
+                    c: self._learn(data[torch.from_numpy(y == c)], [self._feature_leaf(data.shape[1])]) for c in (0, 1)
+                }
+        finally:
+            torch.set_default_dtype(prev)
+        # the original (unsmoothed, unresampled) training class distribution
+        self.root = {"spns": spns, "log_prior": np.log(counts / counts.sum()), "variance_floor": self.variance_floor}
+        return self
+
+    @torch.no_grad()
+    def log_joint(self, Z: np.ndarray, marginalize: list[str] | None = None) -> np.ndarray:
+        """(n, 2) array of log P(Z, Y=c) = log pi_c + log P(Z | Y=c)."""
+        if self.root is None:
+            raise RuntimeError("SPN is not fitted")
+        data = self._features(Z, marginalize)
+        cols = [self.root["spns"][c].log_likelihood(data).reshape(len(data), -1)[:, 0].numpy() for c in (0, 1)]
+        return np.stack(cols, axis=1) + self.root["log_prior"]
+
+    def log_marginal(self, Z: np.ndarray, marginalize: list[str] | None = None) -> np.ndarray:
+        lj = self.log_joint(Z, marginalize)
+        return np.logaddexp(lj[:, 0], lj[:, 1])
+
+    def log_prior(self) -> np.ndarray:
+        return self.root["log_prior"]
+
+    def hyperparameters(self) -> dict[str, Any]:
+        c = self.config
+        return {
+            "leaf": c.leaf,
+            "rdc_threshold": c.rdc_threshold,
+            "min_instances_slice": c.min_instances_slice,
+            "variance_floor": self.root["variance_floor"] if c.leaf == "normal" else None,
+            "histogram_smoothing": c.histogram.smoothing if c.leaf == "histogram" else None,
+        }
+
+    def summary(self) -> dict[str, Any]:
+        out = {
+            "model": self.kind,
+            "log_prior": self.log_prior().tolist(),
+            "features": self.feature_names,
+            **self.hyperparameters(),
+            "structure": {name: structure_stats(self.root["spns"][c]) for c, name in ((0, "correct"), (1, "wrong"))},
+        }
+        if getattr(self, "tuning", None):
+            out["tuning"] = self.tuning
+        return out

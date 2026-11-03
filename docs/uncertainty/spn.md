@@ -124,6 +124,41 @@ with the model and reused on the test split.
 | `prior_smoothing` | 1.0 | Laplace pseudo-count of the label leaves |
 | `seed` | 42 | structure-learning seed |
 
+## Class-conditional SPN (`class_conditional_spn:`)
+
+`ClassConditionalSPN` (`spuma/spn/model.py`) is a second risk model next to the joint SPN, which it leaves unchanged.
+It learns **two independent SPNs**, one density per class, and combines them by Bayes' rule in log space:
+
+```text
+SPN_correct(Z) = P(Z | Y = 0)        SPN_wrong(Z) = P(Z | Y = 1)        π_c = n_c / n  (training split, unsmoothed)
+log P(Z, Y = c) = log π_c + log SPN_c(Z)
+P(wrong | Z)    = exp( log P(Z, 1) − logsumexp_c log P(Z, c) )
+```
+
+- **Same inputs and preprocessing** as the joint SPN: the same features per architecture (per agent / per response,
+  not aggregated, for Star and Sequential), standardized with the training statistics, histogram edges from all
+  training rows (so both classes share them). Every `spn:` setting not tuned below is reused.
+- **Training:** each SPN is learned on its class's training rows only (LearnSPN, RDC partitioning with constant
+  columns split off; no label column).
+- **Regularization:** Gaussian leaves (`FlooredNormal`) keep σ² ≥ `variance_floor`; histogram leaves are
+  Laplace-smoothed with `histogram_smoothing` pseudo-counts per cell.
+- **Validation tuning:** every combination of `leaves` × `rdc_threshold` × `min_instances_slice` × the leaf's
+  regularizer is fitted on the training split; the candidate with the lowest **validation Brier score** is kept
+  (all trials are in `<method>_cc_status.json`). The test split is used only for evaluation.
+- **Methods:** with `enabled: true`, every SPN method `m` of the CHMM study (`spn`, `rms_spn`, `chmm_a<α>_spn`) gets
+  `m_cc`, evaluated on the same test problems and bootstrap resamples; `evaluation.json` →
+  `class_conditional_comparisons` and `results.md` hold the paired differences class-conditional − joint.
+  The same model is also registered as risk model `spn_class_conditional` (`evaluation.risk_models`, `ood.risk_model`).
+
+| Setting | Default grid | Role |
+|---|---|---|
+| `enabled` | false (true in the experiment configs) | train and evaluate the class-conditional SPNs |
+| `leaves` | normal, histogram | feature-leaf families tried |
+| `rdc_threshold` | 0.1, 0.2, 0.3, 0.4 | RDC independence threshold |
+| `min_instances_slice` | 25, 50, 100 | below this many rows a slice is fully factorized |
+| `variance_floor` | 0.01, 0.1 | Gaussian σ² floor (standardized units) |
+| `histogram_smoothing` | 1.0, 5.0 | histogram Laplace pseudo-count |
+
 ## Saved models
 
 Each trained SPN is saved as `chmm-<fp>/models/<method>.pt`, holding the network, feature names, standardization

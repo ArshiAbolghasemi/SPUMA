@@ -82,8 +82,12 @@ def test_situational_distances_first_gap_is_missing():
 
 @pytest.fixture
 def experiment(raw_config, tmp_path):
-    """A small fake MATH experiment run end to end (generate .. evaluate), CHMM included."""
-    raw = raw_config
+    """A small fake MATH experiment run end to end (generate .. evaluate), CHMM included (joint SPNs only)."""
+    raw_config["class_conditional_spn"]["enabled"] = False
+    return _run_experiment(raw_config, tmp_path)
+
+
+def _run_experiment(raw, tmp_path):
     raw["experiment"].update({"name": "id_math", "output_dir": str(tmp_path), "concurrent_problems": 1})
     raw["agents"]["max_rounds"] = 3
     raw["evaluation"]["bootstrap"]["iterations"] = 20
@@ -127,6 +131,27 @@ def test_chmm_runs_in_the_experiment_and_evaluates_frozen(experiment):
     again = aggregation.evaluate(frozen_from=out)
     assert {p.name: p.read_bytes() for p in (out / "models").iterdir()} == before
     assert json.dumps(again["methods"]) == json.dumps(ev["methods"])  # NaN-aware (entropy has no Brier/ECE)
+
+
+def test_class_conditional_spn_is_tuned_on_validation_and_compared_with_the_joint_spn(raw_config, tmp_path):
+    raw_config["class_conditional_spn"] = {
+        "enabled": True,
+        "leaves": ["normal", "histogram"],
+        "rdc_threshold": [0.3],
+        "min_instances_slice": [20],
+        "variance_floor": [0.01, 0.1],
+        "histogram_smoothing": [1.0],
+    }
+    runner = _run_experiment(raw_config, tmp_path)
+    aggregation = CHMMAggregation(runner)
+    ev = runner.store.read_json(f"{aggregation.out}/evaluation.json")
+    for m in aggregation.spn_methods:
+        status = runner.store.read_json(f"{aggregation.out}/models/{m}_cc_status.json")
+        assert status["model"] == "class_conditional" and len(status["tuning"]) == 3
+        assert status["validation_rows"] > 0 and set(status["structure"]) == {"correct", "wrong"}
+        assert {"auroc", "auprc", "auarc", "brier", "ece"} <= set(ev["methods"][f"{m}_cc"])
+        assert set(ev["class_conditional_comparisons"][f"{m}_cc-{m}"]) == set(ev["methods"][m])
+    assert "class-conditional SPN minus joint SPN" in (runner.store.path(aggregation.out) / "results.md").read_text()
 
 
 class EvalOnlyDataset:

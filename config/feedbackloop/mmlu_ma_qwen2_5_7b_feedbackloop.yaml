@@ -155,6 +155,17 @@ spn:
   standardize: true
   prior_smoothing: 1.0
 
+# Class-conditional SPN next to the joint SPN: P(Z | Y=c) learned per class (LearnSPN, the `spn:` settings and
+# preprocessing), P(Y=1 | Z) by Bayes' rule with the training prior. Each list is a grid; every candidate is fitted
+# on the training split and the lowest validation Brier is kept. Methods `<spn method>_cc` in the chmm evaluation.
+class_conditional_spn:
+  enabled: true
+  leaves: [normal, histogram]
+  rdc_threshold: [0.1, 0.2, 0.3, 0.4]
+  min_instances_slice: [25, 50, 100]
+  variance_floor: [0.01, 0.1]       # normal leaves: sigma^2 >= floor (standardized features)
+  histogram_smoothing: [1.0, 5.0]   # histogram leaves: Laplace pseudo-count per cell
+
 evaluation:
   metrics:
     - auroc

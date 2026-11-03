@@ -52,7 +52,7 @@ class OODConfig:
             as_path(self, name)
             if not getattr(self, name).is_absolute():
                 object.__setattr__(self, name, PROJECT_ROOT / getattr(self, name))
-        check_choice("ood.risk_model", self.risk_model, ("spn",))
+        check_choice("ood.risk_model", self.risk_model, ("spn", "spn_class_conditional"))
         for m in self.metrics:
             check_choice("ood.metrics[]", m, tuple(METRICS))
         if self.dataset.train_samples or self.dataset.validation_samples:

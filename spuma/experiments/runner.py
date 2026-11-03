@@ -337,6 +337,7 @@ class ExperimentRunner:
 
     def train(self) -> None:
         Z, y, _ = self._matrix("train")
+        Z_val, y_val, _ = self._matrix("validation")
         for name in get_settings().evaluation.risk_models:
             status_rel = f"{self.scored_dir()}/models/{name}_status.json"
             if not len(y):
@@ -345,7 +346,8 @@ class ExperimentRunner:
                 self.store.write_json(status_rel, {"status": "skipped", "reason": reason})
                 continue
             try:
-                model = risk_model_spec(name).build().fit(Z, y)
+                spec = risk_model_spec(name)
+                model = spec.build().fit(Z, y, Z_val, y_val) if spec.tuned_on_validation else spec.build().fit(Z, y)
             except ValueError as e:
                 logger.error("risk model training failed", extra={"model": name, "error": str(e)})
                 self.store.write_json(status_rel, {"status": "failed", "error": str(e)})

@@ -136,6 +136,9 @@ def _config(config, tmp_path, backend="transformers", scoring="same", concurrent
     raw["evaluation"]["bootstrap"]["iterations"] = 50
     raw["evaluation"]["risk_models"] = ["spn"]  # the risk-model path (used by OOD evaluation)
     raw["spn"]["min_instances_slice"] = 20
+    # a one-point-per-leaf grid keeps the class-conditional SPN (enabled in the experiment configs) fast
+    raw["class_conditional_spn"].update({"rdc_threshold": [0.3], "min_instances_slice": [20]})
+    raw["class_conditional_spn"].update({"variance_floor": [0.01], "histogram_smoothing": [1.0]})
     raw["model"]["backend"], raw["model"]["scoring_backend"] = backend, scoring
     return type(config).from_dict(raw)
 
@@ -334,7 +337,8 @@ def test_star_pipeline_with_chmm(set_settings, tmp_path, fake_capabilities, monk
         assert not any(references[s["problem_id"]] in m["content"] for m in s["input_messages"])
 
     summary = store.read_json("summary.json")
-    assert list(summary["chmm"]) == [*STANDALONE, "spn", "spn_entropy"]  # star: one SPN, no RMS or CHMM weighting
+    # star: one SPN, no RMS or CHMM weighting; plus its class-conditional counterpart
+    assert list(summary["chmm"]) == [*STANDALONE, "spn", "spn_entropy", "spn_cc", "spn_cc_entropy"]
     assert len(cfg.chmm.alphas) and "chmm_a1_spn" not in summary["chmm"]
     out = CHMMAggregation(runner).out
     steps = store.read_jsonl(f"{out}/steps.jsonl")

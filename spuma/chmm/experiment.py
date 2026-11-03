@@ -22,7 +22,9 @@ splits) and regenerates nothing.
        posterior entropy (`<method>_entropy`, a ranking score only). A group's CHMM feature is
        sum_{t in g} (T / n_g) w_t U_t with the trajectory-normalized w_t: with uniform weights the group mean (the
        weighted mean when pooled), a single response scaled by its relative weight T w_t.
-       One joint SPN per SPN method (the `spn:` section, unchanged), trained on the training split.
+       One joint SPN per SPN method (the `spn:` section, unchanged), trained on the training split. With
+       `class_conditional_spn.enabled`, also one class-conditional SPN per SPN method (`<method>_cc`), fitted on
+       the training split with hyper-parameters selected on the validation split (Brier).
        Standalone scores are ranked as they are; their Brier/ECE are reported only after a Platt (logistic)
        calibrator fitted on the training split.
     6. evaluation on the test split: AUROC, AUPRC, AUARC, AURC, Brier, ECE (wrong = 1) with paired
@@ -59,7 +61,7 @@ from spuma.config import PROJECT_ROOT, get_settings
 from spuma.config.settings import load_settings
 from spuma.dataset.math.answers import extract_boxed
 from spuma.evaluation.metrics import METRICS, binary_entropy, expected_calibration_error
-from spuma.spn.model import JointSPN
+from spuma.spn.model import ClassConditionalSPN, JointSPN
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +79,19 @@ LABELS = {
     "rms_spn": "RMS SPN",
     "spn": "SPN",
 }
+CC = "_cc"  # suffix of a class-conditional SPN method: `<joint method>_cc`
+
+
+def method_label(m: str) -> str:
+    base = m.removesuffix("_entropy")
+    joint = base.removesuffix(CC)
+    name = LABELS.get(joint, "CHMM + SPN") + (" (class-conditional)" if joint != base else "")
+    return name + (" posterior entropy" if m != base else "")
+
+
+def method_alpha(m: str, alphas: list[float]) -> float | None:
+    joint = m.removesuffix("_entropy").removesuffix(CC)
+    return next((a for a in alphas if chmm_method(a) == joint), None)
 
 
 def chmm_method(alpha: float) -> str:
@@ -203,6 +218,8 @@ class CHMMAggregation:
             model.save(self.store.path(f"{self.out}/models/{m}.pt"))
             status = {"status": "trained", "train_rows": len(y), "incorrect": int(y.sum()), **model.summary()}
             self.store.write_json(f"{self.out}/models/{m}_status.json", status)
+        if get_settings().class_conditional_spn.enabled:
+            self._train_class_conditional(problems, y, spn)
         calibrators = {}
         for m in STANDALONE:
             s = np.array([self._standalone(p, m) for p in problems])
@@ -211,13 +228,43 @@ class CHMMAggregation:
         self.store.write_json(f"{self.out}/models/calibrators.json", calibrators)
         logger.info("chmm models trained", extra={"methods": self.spn_methods, "output": self.out})
 
+    def _train_class_conditional(self, problems: list[dict[str, Any]], y: np.ndarray, spn: Any) -> None:
+        """One class-conditional SPN per SPN method: fitted on `problems` (training split), tuned on validation."""
+        val = [p for p in self._problems() if p["split"] == "validation"]
+        if self.uses_chmm and val:
+            hmm = SituationalHMM.load(self.store.path(f"{self.out}/models/chmm.pkl"))
+            self._weigh(val, hmm)  # the frozen training CHMM, as for the test split
+        y_val = np.array([p["label"] for p in val], dtype=int)
+        if not len(val):
+            logger.warning("no labeled validation problems: class-conditional SPN uses the first grid candidate")
+        for m in self.spn_methods:
+            model = ClassConditionalSPN.__new__(ClassConditionalSPN)
+            model._init(spn, self.feature_names)
+            Z_val = self._aggregate(val, m) if val else None
+            model.fit(self._aggregate(problems, m), y, Z_val, y_val if val else None)
+            model.save(self.store.path(f"{self.out}/models/{m}{CC}.pt"))
+            status = {
+                "status": "trained",
+                "train_rows": len(y),
+                "incorrect": int(y.sum()),
+                "validation_rows": len(y_val),
+                **model.summary(),
+            }
+            self.store.write_json(f"{self.out}/models/{m}{CC}_status.json", status)
+
     def evaluate(self, frozen_from: Path | None = None) -> dict[str, Any]:
         """The nine methods on the test split, with the CHMM, SPNs and calibrators of `train` (or of
         `frozen_from`, another experiment's chmm directory) loaded and frozen."""
         src = Path(frozen_from) if frozen_from is not None else self.store.path(self.out)
         if not (src / "models" / "calibrators.json").is_file():
             raise RuntimeError(f"no trained models in {src}: run the train phase first")
-        models = {m: JointSPN.load(src / "models" / f"{m}.pt") for m in self.spn_methods}
+        models: dict[str, JointSPN] = {m: JointSPN.load(src / "models" / f"{m}.pt") for m in self.spn_methods}
+        # class-conditional SPNs, where `train` fitted them (`class_conditional_spn.enabled`)
+        models |= {
+            f"{m}{CC}": ClassConditionalSPN.load(path)
+            for m in self.spn_methods
+            if (path := src / "models" / f"{m}{CC}.pt").is_file()
+        }
         for m, model in models.items():
             if model.feature_names != self.feature_names:
                 raise ValueError(f"{src}: {m} was trained on {model.feature_names}, not {self.feature_names}")
@@ -235,7 +282,7 @@ class CHMMAggregation:
         idx = np.array([p["split"] == "test" for p in problems])
         if not idx.any():
             raise RuntimeError("chmm: no labeled test problems")
-        Z = {m: self._aggregate(problems, m) for m in self.spn_methods}
+        Z = {m: self._aggregate(problems, m.removesuffix(CC)) for m in models}
         standalone = {m: np.array([self._standalone(p, m) for p in problems]) for m in STANDALONE}
         y = np.array([p["label"] for p in problems])[idx]
         groups = np.array([p["problem_id"] for p in problems])[idx]
@@ -243,7 +290,7 @@ class CHMMAggregation:
         for m in STANDALONE:
             s = standalone[m][idx]
             scores[m] = {"rank": s, "prob": _platt(calibrators[m], s)}
-        for m in self.spn_methods:
+        for m in models:
             p_err = models[m].predict_error_proba(Z[m][idx])
             scores[m] = {"rank": p_err, "prob": p_err}
             scores[f"{m}_entropy"] = {"rank": binary_entropy(p_err), "prob": None}  # a ranking score only
@@ -442,10 +489,10 @@ class CHMMAggregation:
             for i, m in enumerate(methods)
         }
         primary = chmm_method(c.primary_alpha) if self.uses_chmm else "spn"
-        comparisons = {}
-        for other in ("rms_spn", "rms_se", "rms_mcsp") if self.uses_chmm else ("rms_se", "rms_mcsp"):
-            i, o = methods.index(primary), methods.index(other)
-            comparisons[f"{primary}-{other}"] = {
+
+        def compare(first: str, other: str) -> dict[str, Any]:
+            i, o = methods.index(first), methods.index(other)
+            return {
                 k: {
                     "diff": point[primary][k] - point[other][k],
                     "ci": interval(boot[:, i, j] - boot[:, o, j]),
@@ -461,6 +508,11 @@ class CHMMAggregation:
                 }
                 for j, k in enumerate(METRIC_NAMES)
             }
+
+        others = ("rms_spn", "rms_se", "rms_mcsp") if self.uses_chmm else ("rms_se", "rms_mcsp")
+        comparisons = {f"{primary}-{other}": compare(primary, other) for other in others}
+        # class-conditional minus joint SPN, per SPN method
+        cc = {f"{m}-{m.removesuffix(CC)}": compare(m, m.removesuffix(CC)) for m in methods if m.endswith(CC)}
         return {
             "split": "test",
             "bootstrap": {
@@ -471,6 +523,7 @@ class CHMMAggregation:
             },
             "methods": results,
             "comparisons": comparisons,
+            "class_conditional_comparisons": cc,
         }
 
     # -- outputs ---------------------------------------------------------------------------------------------
@@ -603,9 +656,8 @@ class CHMMAggregation:
             "|---|---|---|---|" + "---|" * len(METRIC_NAMES),
         ]
         for m in res:
-            base = m.removesuffix("_entropy")
-            alpha = next((f"{a:g}" for a in self.config.alphas if chmm_method(a) == base), "—")
-            name = LABELS.get(base, "CHMM + SPN") + (" posterior entropy" if m != base else "")
+            a = method_alpha(m, self.config.alphas)
+            alpha, name = "—" if a is None else f"{a:g}", method_label(m)
             lines.append(
                 f"| {dataset} | {arch} | {name} | {alpha} | " + " | ".join(cell(m, k) for k in METRIC_NAMES) + " |"
             )
@@ -641,6 +693,24 @@ class CHMMAggregation:
             "is not better.",
             "",
         ]
+        if evaluation.get("class_conditional_comparisons"):
+            lines += [
+                "Paired differences, class-conditional SPN minus joint SPN (p: share of resamples where the "
+                "class-conditional SPN is not better):",
+                "",
+                "| Joint SPN | " + " | ".join(k.upper() for k in METRIC_NAMES) + " |",
+                "|---|" + "---|" * len(METRIC_NAMES),
+            ]
+            for key, comp in evaluation["class_conditional_comparisons"].items():
+                d = [comp[k] for k in METRIC_NAMES]
+                lines.append(
+                    f"| {method_label(key.split('-', 1)[1])} | "
+                    + " | ".join(
+                        f"{v['diff']:+.4f} [{v['ci'][0]:+.3f}, {v['ci'][1]:+.3f}] p={v['p_not_better']:.3f}" for v in d
+                    )
+                    + " |"
+                )
+            lines.append("")
         if self.uses_chmm:
             lines += self._chmm_report(evaluation, diagnostics, hmm)
         self.store.write_json(f"{self.out}/results_table.json", _table_rows(evaluation, dataset, arch, self.config))
@@ -726,7 +796,7 @@ def _table_rows(evaluation: dict[str, Any], dataset: str, arch: str, config: Any
     """The consolidated table as rows (standalone Brier/ECE are the calibrated ones, flagged)."""
     out = []
     for m, r in evaluation["methods"].items():
-        alpha = next((a for a in config.alphas if chmm_method(a) == m.removesuffix("_entropy")), None)
+        alpha = method_alpha(m, config.alphas)
         out.append(
             {
                 "dataset": dataset,

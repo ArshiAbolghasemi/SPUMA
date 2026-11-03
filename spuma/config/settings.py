@@ -31,7 +31,7 @@ from spuma.dataset.config import DatasetConfig
 from spuma.evaluation.config import EvaluationConfig
 from spuma.experiments.config import ExperimentConfig, ProjectConfig
 from spuma.models.config import GenerationConfig, ModelConfig
-from spuma.spn.config import SPNConfig
+from spuma.spn.config import ClassConditionalSPNConfig, SPNConfig
 from spuma.uncertainty.config import AggregationConfig, FeaturesConfig, UncertaintyConfig
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -56,6 +56,7 @@ class Settings:
     uncertainty: UncertaintyConfig = field(default_factory=UncertaintyConfig)
     aggregation: AggregationConfig = field(default_factory=AggregationConfig)
     spn: SPNConfig = field(default_factory=SPNConfig)
+    class_conditional_spn: ClassConditionalSPNConfig = field(default_factory=ClassConditionalSPNConfig)
     evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
     chmm: CHMMConfig = field(default_factory=CHMMConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)

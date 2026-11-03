@@ -30,7 +30,7 @@ Model, sampling, seeds, per-response measurement and prompt composition: [shared
 |---|---|
 | [Per-response metrics](docs/uncertainty/metrics.md) | semantic entropy, Monte Carlo sequence probability, negative log-likelihood, token length |
 | [Scores per architecture](docs/uncertainty/methods.md) | every evaluated score and exactly which features it uses |
-| [Sum-product network](docs/uncertainty/spn.md) | the joint SPN: P(wrong \| features), posterior entropy, structure learning, leaves, settings |
+| [Sum-product network](docs/uncertainty/spn.md) | the joint SPN: P(wrong \| features), posterior entropy, structure learning, leaves, settings; the class-conditional SPN |
 | [CHMM weighting](docs/uncertainty/chmm.md) | question drift, interaction gap, hidden states, weights (feedback loop) |
 | [Training and evaluation](docs/uncertainty/evaluation.md) | SPN training, calibration, metrics, bootstrap, dataset-specific and frozen protocols |
 
@@ -84,7 +84,7 @@ Phases run in order and can be selected with `--phase` (repeatable):
 |---|---|---|
 | `generate` | runs the agents on every problem; draws the semantic-entropy samples | GPU (vLLM or Transformers) |
 | `score` | per-step PE/NLL (teacher forcing) and semantic entropy; writes the features | GPU + the NLI model |
-| `train` | trains the risk models (joint SPN) | CPU |
+| `train` | trains the risk models (joint SPN; class-conditional SPN tuned on validation) | CPU |
 | `evaluate` | AUROC, AUARC, ECE, ... with bootstrap intervals on validation/test | CPU |
 
 Re-use saved work instead of recomputing it:

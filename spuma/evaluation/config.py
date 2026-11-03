@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 
 from spuma.common.config import check_choice, check_range
 
-RISK_MODEL_NAMES = ("spn",)
+RISK_MODEL_NAMES = ("spn", "spn_class_conditional")
 
 
 @dataclass(frozen=True)
