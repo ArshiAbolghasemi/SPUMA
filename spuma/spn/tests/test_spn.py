@@ -10,6 +10,7 @@ from spflow.modules.products import Product
 from spflow.modules.sums import Sum
 
 from spuma.evaluation.metrics import auroc, binary_entropy
+from spuma.spn import model as spn_model
 from spuma.spn.config import HistogramConfig, SPNConfig
 from spuma.spn.leaves import (
     BinaryIndicatorLeaf,
@@ -237,6 +238,20 @@ def test_label_is_never_split_off_alone_while_it_varies():
     assert int((ids == ids[3]).sum()) == 1
 
 
+def test_label_placement_survives_an_rdc_failure(monkeypatch):
+    rng = np.random.default_rng(0)
+    y = (rng.random(300) < 0.4).astype(float)
+    x = np.c_[rng.normal(size=300), rng.normal(size=300) + 2 * y, rng.normal(size=300)]
+    data = torch.tensor(np.c_[x, y])
+
+    def failing_rdc(a, b):
+        raise RuntimeError("max(): Expected reduction dim to be specified for input.numel() == 0")
+
+    monkeypatch.setattr(spn_model, "rdc", failing_rdc)
+    kept = partition_keeping_label(data, threshold=0.99)
+    assert kept[3] == kept[1]  # joined with the most correlated feature, not split off
+
+
 def test_floored_normal_keeps_variance_above_floor():
     with leaf_settings(LeafSettings(label_smoothing=1.0, bin_smoothing=1.0, edges={}, variance_floor=0.25)):
         leaf = FlooredNormal(Scope([0]))
@@ -278,6 +293,27 @@ def test_grid_is_tuned_on_validation_brier_and_checkpointed(cls, config, set_set
     assert loaded.hyperparameters() == model.hyperparameters() and loaded.config == model.config
     # no validation rows: the first grid point, untuned
     assert cls().fit(Z, y).config == SPNConfig(**GRID).candidates()[0]
+
+
+def test_a_failing_grid_candidate_is_skipped(config, set_settings, monkeypatch):
+    set_settings(dataclasses.replace(config, spn=SPNConfig(**GRID)))
+    Z, y = _synthetic()
+    Zv, yv = _synthetic(200, seed=1)
+    bad = SPNConfig(**GRID).candidates()[0]
+    real_fit = JointSPN._fit
+
+    def fit(self, Z, y):
+        if self.config == bad:
+            raise RuntimeError("RDC failed")
+        return real_fit(self, Z, y)
+
+    monkeypatch.setattr(JointSPN, "_fit", fit)
+    model = JointSPN().fit(Z, y, Zv, yv)
+    failed = [t for t in model.tuning if "error" in t]
+    assert len(failed) == 1 and failed[0]["validation_brier"] == float("inf") and model.config != bad
+    monkeypatch.setattr(JointSPN, "_fit", lambda self, Z, y: (_ for _ in ()).throw(RuntimeError("RDC failed")))
+    with pytest.raises(RuntimeError, match="every joint SPN candidate failed"):
+        JointSPN().fit(Z, y, Zv, yv)
 
 
 def test_class_conditional_spn_bayes_rule_and_empirical_prior(make_spn, tmp_path):

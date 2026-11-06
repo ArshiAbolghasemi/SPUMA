@@ -88,7 +88,8 @@ def partition_keeping_label(data: torch.Tensor, threshold: float) -> torch.Tenso
     A block {Y} under a product node would make Y independent of every feature in that branch, so P(Y | Z)
     could not depend on Z there. When RDC (a noisy test, and the label's dependence is often weak) proposes
     it, Y joins the block of the feature it is most dependent on instead. Merging blocks keeps the product
-    decomposable, so the SPN stays valid; a label that is constant in the slice is still split off.
+    decomposable, so the SPN stays valid; a label that is constant in the slice is still split off. If RDC
+    fails numerically on the slice (small slices), the absolute Pearson correlation picks the feature instead.
     """
     ids = partition_with_constants(data, threshold)
     j = _label_column(data)
@@ -97,8 +98,12 @@ def partition_keeping_label(data: torch.Tensor, threshold: float) -> torch.Tenso
     others = [k for k in range(data.shape[1]) if k != j and float(data[:, k].std()) > 0]
     if not others:
         return ids
-    scores = [float(rdc(data[:, j], data[:, k])) for k in others]
-    ids[j] = ids[others[int(np.argmax(scores))]]
+    try:
+        scores = [float(rdc(data[:, j], data[:, k])) for k in others]
+    except RuntimeError as e:
+        logger.warning("RDC failed placing the label; using |correlation|", extra={"error": str(e), "rows": len(data)})
+        scores = [abs(float(torch.corrcoef(torch.stack([data[:, j], data[:, k]]))[0, 1])) for k in others]
+    ids[j] = ids[others[int(np.nanargmax(scores))]] if not np.isnan(scores).all() else ids[others[0]]
     return ids
 
 
@@ -227,11 +232,18 @@ class JointSPN:
         for config in candidates:
             model = type(self).__new__(type(self))
             model._init(config, self.feature_names)
-            score = brier(np.asarray(y_val), model._fit(Z, y).predict_error_proba(Z_val))
+            try:
+                score = brier(np.asarray(y_val), model._fit(Z, y).predict_error_proba(Z_val))
+            except (RuntimeError, ValueError) as e:  # one bad grid point must not stop the tuning
+                logger.warning("spn candidate failed; skipped", extra={**model.hyperparameters(), "error": str(e)})
+                trials.append({**model.hyperparameters(), "validation_brier": float("inf"), "error": str(e)})
+                continue
             score = score if np.isfinite(score) else float("inf")
             trials.append({**model.hyperparameters(), "validation_brier": score})
             if best is None or score < best[0]:
                 best = (score, model)
+        if best is None:
+            raise RuntimeError(f"every {self.kind} SPN candidate failed: {[t['error'] for t in trials]}")
         self.__dict__.update(best[1].__dict__)
         self.tuning = trials
         logger.info(f"{self.kind} SPN tuned", extra={"selected": self.hyperparameters(), "brier": best[0]})
