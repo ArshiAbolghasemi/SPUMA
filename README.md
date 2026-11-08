@@ -54,14 +54,40 @@ wheels are GBs and a caching mirror fetches an uncached file before it sends a b
 
 ## Experiments
 
-Each experiment is run by name; the name maps to its settings file `config/<name>.yaml` (registered in
-`spuma/experiments/registry.py`). OOD evaluations work the same way (`spuma/ood/registry.py`):
+The 12 registered experiments evaluate Qwen2.5-7B-Instruct on four datasets with Feedback, Sequential,
+and Star architectures. Experiment names link to their settings in `config/<architecture>/`; registration
+is defined in `spuma/experiments/registry.py`.
 
-| experiment | module | settings | dataset | splits (train / validation / test) | what it runs |
+Each report includes the experimental setup, exact prompts, results tables, and SVG comparison plots.
+The nine frozen evaluations apply MATH-trained uncertainty models to the other datasets without refitting.
+Split counts below are the usable training / validation / test problems in the dataset-specific evaluation.
+
+| Experiment / settings | Dataset | Architecture | Usable splits | Dataset-specific report | Frozen MATH report |
 |---|---|---|---|---|---|
-| `math_ma_qwen2_5_7b_feedbackloop` | `spuma/experiments/math.py` | `config/math_ma_qwen2_5_7b_feedbackloop.yaml` | [MATH](https://huggingface.co/datasets/EleutherAI/hendrycks_math) (Hendrycks et al., 2021) | 800 / 200 from official train, 500 from official test | Qwen2.5-7B-Instruct Mathematician <-> Enthusiast feedback |
+| [math_ma_qwen2_5_7b_feedbackloop](config/feedbackloop/math_ma_qwen2_5_7b_feedbackloop.yaml) | MATH | Feedback | 800 / 200 / 500 | [Report](docs/experiment/math_ma_qwen2_5_7b_feedbackloop/report.md) | — |
+| [math_ma_qwen2_5_7b_sequential](config/sequential/math_ma_qwen2_5_7b_sequential.yaml) | MATH | Sequential | 800 / 200 / 500 | [Report](docs/experiment/math_ma_qwen2_5_7b_sequential/report.md) | — |
+| [math_ma_qwen2_5_7b_star](config/star/math_ma_qwen2_5_7b_star.yaml) | MATH | Star | 800 / 200 / 500 | [Report](docs/experiment/math_ma_qwen2_5_7b_star/report.md) | — |
+| [mmlu_ma_qwen2_5_7b_feedbackloop](config/feedbackloop/mmlu_ma_qwen2_5_7b_feedbackloop.yaml) | MMLU | Feedback | 800 / 200 / 500 | [Report](docs/experiment/mmlu_ma_qwen2_5_7b_feedbackloop/report.md) | [Report](docs/experiment/mmlu_ma_qwen2_5_7b_feedbackloop/frozen_math/report.md) |
+| [mmlu_ma_qwen2_5_7b_sequential](config/sequential/mmlu_ma_qwen2_5_7b_sequential.yaml) | MMLU | Sequential | 800 / 200 / 500 | [Report](docs/experiment/mmlu_ma_qwen2_5_7b_sequential/report.md) | [Report](docs/experiment/mmlu_ma_qwen2_5_7b_sequential/frozen_math/report.md) |
+| [mmlu_ma_qwen2_5_7b_star](config/star/mmlu_ma_qwen2_5_7b_star.yaml) | MMLU | Star | 800 / 200 / 500 | [Report](docs/experiment/mmlu_ma_qwen2_5_7b_star/report.md) | [Report](docs/experiment/mmlu_ma_qwen2_5_7b_star/frozen_math/report.md) |
+| [musique_ma_qwen2_5_7b_feedbackloop](config/feedbackloop/musique_ma_qwen2_5_7b_feedbackloop.yaml) | MuSiQue | Feedback | 783 / 197 / 494 | [Report](docs/experiment/musique_ma_qwen2_5_7b_feedbackloop/report.md) | [Report](docs/experiment/musique_ma_qwen2_5_7b_feedbackloop/frozen_math/report.md) |
+| [musique_ma_qwen2_5_7b_sequential](config/sequential/musique_ma_qwen2_5_7b_sequential.yaml) | MuSiQue | Sequential | 800 / 200 / 500 | [Report](docs/experiment/musique_ma_qwen2_5_7b_sequential/report.md) | [Report](docs/experiment/musique_ma_qwen2_5_7b_sequential/frozen_math/report.md) |
+| [musique_ma_qwen2_5_7b_star](config/star/musique_ma_qwen2_5_7b_star.yaml) | MuSiQue | Star | 800 / 200 / 500 | [Report](docs/experiment/musique_ma_qwen2_5_7b_star/report.md) | [Report](docs/experiment/musique_ma_qwen2_5_7b_star/frozen_math/report.md) |
+| [morehopqa_ma_qwen2_5_7b_feedbackloop](config/feedbackloop/morehopqa_ma_qwen2_5_7b_feedbackloop.yaml) | MoreHopQA | Feedback | 480 / 120 / 500 | [Report](docs/experiment/morehopqa_ma_qwen2_5_7b_feedbackloop/report.md) | [Report](docs/experiment/morehopqa_ma_qwen2_5_7b_feedbackloop/frozen_math/report.md) |
+| [morehopqa_ma_qwen2_5_7b_sequential](config/sequential/morehopqa_ma_qwen2_5_7b_sequential.yaml) | MoreHopQA | Sequential | 480 / 120 / 500 | [Report](docs/experiment/morehopqa_ma_qwen2_5_7b_sequential/report.md) | [Report](docs/experiment/morehopqa_ma_qwen2_5_7b_sequential/frozen_math/report.md) |
+| [morehopqa_ma_qwen2_5_7b_star](config/star/morehopqa_ma_qwen2_5_7b_star.yaml) | MoreHopQA | Star | 480 / 120 / 500 | [Report](docs/experiment/morehopqa_ma_qwen2_5_7b_star/report.md) | [Report](docs/experiment/morehopqa_ma_qwen2_5_7b_star/frozen_math/report.md) |
 
-See the [MATH experiment report](docs/experiment/math_ma_qwen2_5_7b_feedbackloop/report.md) for results and analysis.
+MuSiQue Feedback excludes 26 conversations that exceeded the context-length limit: 17 training,
+three validation, and six test conversations.
+
+The comparisons are also available as a [combined PDF report](docs/experiment/comparison/report.pdf),
+[LaTeX source package](docs/experiment/comparison/latex-source.zip), and
+[Markdown reports with SVG plots](docs/experiment/comparison/experiment-reports.zip).
+Regenerate the Markdown reports from the completed evaluations with:
+
+```bash
+.venv/bin/python docs/experiment/comparison/build_markdown_reports.py
+```
 
 A settings file defines everything about its experiment: dataset and splits, model and backends
 (`model.backend` for generation, `model.scoring_backend` for teacher-forced scoring), agents and their

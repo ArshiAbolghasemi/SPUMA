@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="628.2pt" height="153pt" viewBox="0 0 628.2 153" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-11-09T02:06:00.463318</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.11.2, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 153 
+L 628.2 153 
+L 628.2 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="axes_1">
+   <g id="text_1">
+    <g id="patch_2">
+     <path d="M 92.214531 67.81043 
+L 126.785469 67.81043 
+Q 133.385469 67.81043 133.385469 61.21043 
+L 133.385469 50.20957 
+Q 133.385469 43.60957 126.785469 43.60957 
+L 92.214531 43.60957 
+Q 85.614531 43.60957 85.614531 50.20957 
+L 85.614531 61.21043 
+Q 85.614531 67.81043 92.214531 67.81043 
+z
+" style="fill: #eaf2f8; stroke: #426176; stroke-linejoin: miter"/>
+    </g>
+    <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: middle" x="109.5" y="58.567852" transform="rotate(-0 109.5 58.567852)">Solver</text>
+   </g>
+   <g id="text_2">
+    <g id="patch_3">
+     <path d="M 288.830078 67.81043 
+L 339.369922 67.81043 
+Q 345.969922 67.81043 345.969922 61.21043 
+L 345.969922 50.20957 
+Q 345.969922 43.60957 339.369922 43.60957 
+L 288.830078 43.60957 
+Q 282.230078 43.60957 282.230078 50.20957 
+L 282.230078 61.21043 
+Q 282.230078 67.81043 288.830078 67.81043 
+z
+" style="fill: #eaf2f8; stroke: #426176; stroke-linejoin: miter"/>
+    </g>
+    <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: middle" x="314.1" y="58.567852" transform="rotate(-0 314.1 58.567852)">Reviewer</text>
+   </g>
+   <g id="patch_4">
+    <path d="M 154.468667 55.71 
+Q 211.802657 55.71 268.018613 55.71 
+" style="fill: none; stroke: #426176; stroke-linecap: round"/>
+    <path d="M 264.018613 53.71 
+L 268.018613 55.71 
+L 264.018613 57.71 
+" style="fill: none; stroke: #426176; stroke-linecap: round"/>
+   </g>
+   <g id="text_3">
+    <g id="patch_5">
+     <path d="M 470.833672 75.512578 
+L 566.566328 75.512578 
+Q 573.166328 75.512578 573.166328 68.912578 
+L 573.166328 42.507422 
+Q 573.166328 35.907422 566.566328 35.907422 
+L 470.833672 35.907422 
+Q 464.233672 35.907422 464.233672 42.507422 
+L 464.233672 68.912578 
+Q 464.233672 75.512578 470.833672 75.512578 
+z
+" style="fill: #eaf2f8; stroke: #426176; stroke-linejoin: miter"/>
+    </g>
+    <text style="font-size: 11px; font-family: 'DejaVu Sans'" transform="translate(479.146406 51.965918)">Stop or repeat</text>
+    <text style="font-size: 11px; font-family: 'DejaVu Sans'" transform="translate(470.833672 65.168926)">(up to 10 rounds)</text>
+   </g>
+   <g id="patch_6">
+    <path d="M 359.068667 55.71 
+Q 416.402657 55.71 472.618613 55.71 
+" style="fill: none; stroke: #426176; stroke-linecap: round"/>
+    <path d="M 468.618613 53.71 
+L 472.618613 55.71 
+L 468.618613 57.71 
+" style="fill: none; stroke: #426176; stroke-linecap: round"/>
+   </g>
+   <g id="text_4">
+    <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: middle" x="314.1" y="125.01" transform="rotate(-0 314.1 125.01)">Each response → 10 additional samples → SE, MCSP, NLL, length → SPN error probability</text>
+   </g>
+  </g>
+ </g>
+</svg>
